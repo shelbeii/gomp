@@ -1,4 +1,4 @@
-module gomp
+module github.com/LustfulCap/gomp
 
 go 1.25.5
 
