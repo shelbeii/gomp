@@ -1,0 +1,232 @@
+package gomp
+
+import (
+	"fmt"
+
+	"gorm.io/gorm"
+)
+
+// UpdateWrapper 更新条件构造器
+type UpdateWrapper[T any] struct {
+	scopes []func(*gorm.DB) *gorm.DB
+	values map[string]any
+	or     bool // 下一个条件是否使用 OR 连接
+}
+
+// NewUpdateWrapper 创建更新条件构造器
+func NewUpdateWrapper[T any]() *UpdateWrapper[T] {
+	return &UpdateWrapper[T]{
+		scopes: make([]func(*gorm.DB) *gorm.DB, 0),
+		values: make(map[string]any),
+		or:     false,
+	}
+}
+
+// addCondition 添加条件 (内部辅助方法)
+func (w *UpdateWrapper[T]) addCondition(query any, args ...any) {
+	isOr := w.or
+	w.or = false
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		if isOr {
+			return db.Or(query, args...)
+		}
+		return db.Where(query, args...)
+	})
+}
+
+// Or 设置下一个条件为 OR 连接，或者添加嵌套 OR 条件
+func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrapper[T] {
+	if len(conditions) > 0 {
+		f := conditions[0]
+		isOr := w.or
+		w.or = false
+		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+			subWrapper := NewUpdateWrapper[T]()
+			f(subWrapper)
+			handler := func(d *gorm.DB) *gorm.DB {
+				return subWrapper.Apply(d)
+			}
+			if isOr {
+				return db.Or(handler)
+			}
+			return db.Or(handler)
+		})
+		return w
+	}
+	w.or = true
+	return w
+}
+
+// And 添加嵌套 AND 条件
+func (w *UpdateWrapper[T]) And(conditions ...func(*UpdateWrapper[T])) *UpdateWrapper[T] {
+	if len(conditions) > 0 {
+		f := conditions[0]
+		isOr := w.or
+		w.or = false
+		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+			subWrapper := NewUpdateWrapper[T]()
+			f(subWrapper)
+			handler := func(d *gorm.DB) *gorm.DB {
+				return subWrapper.Apply(d)
+			}
+			if isOr {
+				return db.Or(handler)
+			}
+			return db.Where(handler)
+		})
+	}
+	w.or = false
+	return w
+}
+
+// Set 设置更新字段 SET column = val
+func (w *UpdateWrapper[T]) Set(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.values[column] = val
+	return w
+}
+
+// Eq 等于 =
+func (w *UpdateWrapper[T]) Eq(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s = ?", column), val)
+	return w
+}
+
+// Ne 不等于 <>
+func (w *UpdateWrapper[T]) Ne(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s <> ?", column), val)
+	return w
+}
+
+// Gt 大于 >
+func (w *UpdateWrapper[T]) Gt(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s > ?", column), val)
+	return w
+}
+
+// Ge 大于等于 >=
+func (w *UpdateWrapper[T]) Ge(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s >= ?", column), val)
+	return w
+}
+
+// Lt 小于 <
+func (w *UpdateWrapper[T]) Lt(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s < ?", column), val)
+	return w
+}
+
+// Le 小于等于 <=
+func (w *UpdateWrapper[T]) Le(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s <= ?", column), val)
+	return w
+}
+
+// Like 模糊查询 LIKE '%值%'
+func (w *UpdateWrapper[T]) Like(column string, val string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val+"%")
+	return w
+}
+
+// LikeLeft 左模糊 LIKE '%值'
+func (w *UpdateWrapper[T]) LikeLeft(column string, val string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val)
+	return w
+}
+
+// LikeRight 右模糊 LIKE '值%'
+func (w *UpdateWrapper[T]) LikeRight(column string, val string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s LIKE ?", column), val+"%")
+	return w
+}
+
+// In IN 查询
+func (w *UpdateWrapper[T]) In(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s IN (?)", column), val)
+	return w
+}
+
+// NotIn NOT IN 查询
+func (w *UpdateWrapper[T]) NotIn(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s NOT IN (?)", column), val)
+	return w
+}
+
+// IsNull IS NULL
+func (w *UpdateWrapper[T]) IsNull(column string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s IS NULL", column))
+	return w
+}
+
+// IsNotNull IS NOT NULL
+func (w *UpdateWrapper[T]) IsNotNull(column string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s IS NOT NULL", column))
+	return w
+}
+
+// Between BETWEEN AND
+func (w *UpdateWrapper[T]) Between(column string, val1, val2 any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s BETWEEN ? AND ?", column), val1, val2)
+	return w
+}
+
+// NotBetween NOT BETWEEN AND
+func (w *UpdateWrapper[T]) NotBetween(column string, val1, val2 any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s NOT BETWEEN ? AND ?", column), val1, val2)
+	return w
+}
+
+// Apply 应用条件到 GORM DB
+func (w *UpdateWrapper[T]) Apply(db *gorm.DB) *gorm.DB {
+	for _, scope := range w.scopes {
+		db = scope(db)
+	}
+	return db
+}
