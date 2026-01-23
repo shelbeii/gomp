@@ -1,4 +1,4 @@
-module MESAPI
+module gomp
 
 go 1.25.5
 
