@@ -13,7 +13,7 @@ GOMP 是一个基于 [GORM](https://gorm.io/) 的增强库，灵感来源于 MyB
 ## 📦 安装
 
 ```bash
-go get github.com/lustfulCap/gomp
+go get github.com/shelbeii/gomp
 ```
 
 ## 🚀 快速开始
