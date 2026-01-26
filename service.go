@@ -2,6 +2,7 @@ package gomp
 
 import (
 	"context"
+	"errors"
 
 	"gorm.io/gorm"
 )
@@ -82,7 +83,9 @@ func (s *ServiceImpl[T]) GetOne(ctx context.Context, wrapper *QueryWrapper[T]) (
 	if wrapper != nil {
 		db = wrapper.Apply(db)
 	}
-	err := db.First(&entity).Error
+	//err := db.First(&entity).Error
+	// 使用 Take 替代 First，避免自动添加 ORDER BY id，提高性能
+	err := db.Take(&entity).Error
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +148,9 @@ func (s *ServiceImpl[T]) Count(ctx context.Context, wrapper *QueryWrapper[T]) (i
 }
 
 func (s *ServiceImpl[T]) Insert(ctx context.Context, wrapper *InsertWrapper[T]) error {
+	if wrapper == nil {
+		return errors.New("insert wrapper cannot be nil")
+	}
 	return s.getDB(ctx).Model(new(T)).Create(wrapper.values).Error
 }
 
@@ -157,10 +163,11 @@ func (s *ServiceImpl[T]) Delete(ctx context.Context, wrapper *DeleteWrapper[T]) 
 }
 
 func (s *ServiceImpl[T]) Update(ctx context.Context, wrapper *UpdateWrapper[T]) error {
-	db := s.getDB(ctx)
-	if wrapper != nil {
-		db = wrapper.Apply(db)
+	if wrapper == nil {
+		return errors.New("update wrapper cannot be nil")
 	}
+	db := s.getDB(ctx)
+	db = wrapper.Apply(db)
 	return db.Model(new(T)).Updates(wrapper.values).Error
 }
 
@@ -177,4 +184,69 @@ func SelectList[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T
 // SelectOne 快捷单条查询
 func SelectOne[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) (*T, error) {
 	return NewServiceImpl[T](db).GetOne(ctx, wrapper)
+}
+
+// Save 快捷保存
+func Save[T any](ctx context.Context, db *gorm.DB, entity *T) error {
+	return NewServiceImpl[T](db).Save(ctx, entity)
+}
+
+// SaveBatch 快捷批量保存
+func SaveBatch[T any](ctx context.Context, db *gorm.DB, entities []*T) error {
+	return NewServiceImpl[T](db).SaveBatch(ctx, entities)
+}
+
+// RemoveById 快捷根据ID删除
+func RemoveById[T any](ctx context.Context, db *gorm.DB, id any) error {
+	return NewServiceImpl[T](db).RemoveById(ctx, id)
+}
+
+// RemoveByIds 快捷根据ID批量删除
+func RemoveByIds[T any](ctx context.Context, db *gorm.DB, ids any) error {
+	return NewServiceImpl[T](db).RemoveByIds(ctx, ids)
+}
+
+// UpdateById 快捷根据ID更新
+func UpdateById[T any](ctx context.Context, db *gorm.DB, entity *T) error {
+	return NewServiceImpl[T](db).UpdateById(ctx, entity)
+}
+
+// GetById 快捷根据ID查询
+func GetById[T any](ctx context.Context, db *gorm.DB, id any) (*T, error) {
+	return NewServiceImpl[T](db).GetById(ctx, id)
+}
+
+// GetOne 快捷查询单条
+func GetOne[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) (*T, error) {
+	return NewServiceImpl[T](db).GetOne(ctx, wrapper)
+}
+
+// List 快捷列表查询
+func List[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) ([]*T, error) {
+	return NewServiceImpl[T](db).List(ctx, wrapper)
+}
+
+// Count 快捷统计
+func Count[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) (int64, error) {
+	return NewServiceImpl[T](db).Count(ctx, wrapper)
+}
+
+// Insert 快捷插入
+func Insert[T any](ctx context.Context, db *gorm.DB, wrapper *InsertWrapper[T]) error {
+	return NewServiceImpl[T](db).Insert(ctx, wrapper)
+}
+
+// Delete 快捷删除
+func Delete[T any](ctx context.Context, db *gorm.DB, wrapper *DeleteWrapper[T]) error {
+	return NewServiceImpl[T](db).Delete(ctx, wrapper)
+}
+
+// Update 快捷更新
+func Update[T any](ctx context.Context, db *gorm.DB, wrapper *UpdateWrapper[T]) error {
+	return NewServiceImpl[T](db).Update(ctx, wrapper)
+}
+
+// Paginate 快捷分页
+func Paginate[T any](ctx context.Context, db *gorm.DB, page *Page[T], wrapper *QueryWrapper[T]) (*Page[T], error) {
+	return NewServiceImpl[T](db).Page(ctx, page, wrapper)
 }
