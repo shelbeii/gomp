@@ -88,6 +88,24 @@ func (w *UpdateWrapper[T]) Set(column string, val any, condition ...bool) *Updat
 	return w
 }
 
+// SetIncrBy 设置字段自增
+func (w *UpdateWrapper[T]) SetIncrBy(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.values[column] = gorm.Expr(fmt.Sprintf("%s + ?", column), val)
+	return w
+}
+
+// SetDecrBy 设置字段自减
+func (w *UpdateWrapper[T]) SetDecrBy(column string, val any, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.values[column] = gorm.Expr(fmt.Sprintf("%s - ?", column), val)
+	return w
+}
+
 // Eq 等于 =
 func (w *UpdateWrapper[T]) Eq(column string, val any, condition ...bool) *UpdateWrapper[T] {
 	if len(condition) > 0 && !condition[0] {

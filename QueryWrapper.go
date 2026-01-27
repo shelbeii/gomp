@@ -8,15 +8,17 @@ import (
 
 // QueryWrapper 查询条件构造器
 type QueryWrapper[T any] struct {
-	scopes []func(*gorm.DB) *gorm.DB
-	or     bool // 下一个条件是否使用 OR 连接
+	scopes  []func(*gorm.DB) *gorm.DB
+	selects []string // 存储需要查询的字段
+	or      bool     // 下一个条件是否使用 OR 连接
 }
 
 // NewQueryWrapper 创建查询条件构造器
 func NewQueryWrapper[T any]() *QueryWrapper[T] {
 	return &QueryWrapper[T]{
-		scopes: make([]func(*gorm.DB) *gorm.DB, 0),
-		or:     false,
+		scopes:  make([]func(*gorm.DB) *gorm.DB, 0),
+		selects: make([]string, 0),
+		or:      false,
 	}
 }
 
@@ -273,9 +275,7 @@ func (w *QueryWrapper[T]) Distinct(args ...any) *QueryWrapper[T] {
 
 // Select 指定查询字段
 func (w *QueryWrapper[T]) Select(columns ...string) *QueryWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Select(columns)
-	})
+	w.selects = append(w.selects, columns...)
 	return w
 }
 
@@ -305,6 +305,9 @@ func (w *QueryWrapper[T]) InnerJoin(table string, on string) *QueryWrapper[T] {
 
 // Apply 应用条件到 GORM DB
 func (w *QueryWrapper[T]) Apply(db *gorm.DB) *gorm.DB {
+	if len(w.selects) > 0 {
+		db = db.Select(w.selects)
+	}
 	for _, scope := range w.scopes {
 		db = scope(db)
 	}
