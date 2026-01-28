@@ -159,6 +159,11 @@ func (s *ServiceImpl[T]) Delete(ctx context.Context, wrapper *DeleteWrapper[T]) 
 	if wrapper != nil {
 		db = wrapper.Apply(db)
 	}
+	if !config.Gomp.AllowGlobalDelete {
+		if db.Statement == nil || db.Statement.Clauses == nil || db.Statement.Clauses["WHERE"].Expression == nil {
+			return errors.New("global delete is not allowed without WHERE clause; set gomp.allowGlobalDelete=true to override")
+		}
+	}
 	return db.Delete(new(T)).Error
 }
 
@@ -168,6 +173,11 @@ func (s *ServiceImpl[T]) Update(ctx context.Context, wrapper *UpdateWrapper[T]) 
 	}
 	db := s.getDB(ctx)
 	db = wrapper.Apply(db)
+	if !config.Gomp.AllowGlobalUpdate {
+		if db.Statement == nil || db.Statement.Clauses == nil || db.Statement.Clauses["WHERE"].Expression == nil {
+			return errors.New("global update is not allowed without WHERE clause; set gomp.allowGlobalUpdate=true to override")
+		}
+	}
 	return db.Model(new(T)).Updates(wrapper.values).Error
 }
 

@@ -8,7 +8,9 @@ import (
 
 var config struct {
 	Gomp struct {
-		EnableSQLPrint bool `yaml:"enableSqlPrint"`
+		EnableSQLPrint    bool `yaml:"enableSqlPrint"`
+		AllowGlobalUpdate bool `yaml:"allowGlobalUpdate"`
+		AllowGlobalDelete bool `yaml:"allowGlobalDelete"`
 	} `yaml:"gomp"`
 }
 
