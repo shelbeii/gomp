@@ -156,13 +156,18 @@ func (s *ServiceImpl[T]) Insert(ctx context.Context, wrapper *InsertWrapper[T]) 
 
 func (s *ServiceImpl[T]) Delete(ctx context.Context, wrapper *DeleteWrapper[T]) error {
 	db := s.getDB(ctx)
+	useSoftDelete := true
 	if wrapper != nil {
+		useSoftDelete = wrapper.useSoftDelete
 		db = wrapper.Apply(db)
 	}
 	if !config.Gomp.AllowGlobalDelete {
 		if db.Statement == nil || db.Statement.Clauses == nil || db.Statement.Clauses["WHERE"].Expression == nil {
 			return errors.New("global delete is not allowed without WHERE clause; set gomp.allowGlobalDelete=true to override")
 		}
+	}
+	if !useSoftDelete {
+		db = db.Unscoped()
 	}
 	return db.Delete(new(T)).Error
 }

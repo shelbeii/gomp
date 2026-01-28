@@ -8,16 +8,23 @@ import (
 
 // DeleteWrapper 删除条件构造器
 type DeleteWrapper[T any] struct {
-	scopes []func(*gorm.DB) *gorm.DB
-	or     bool // 下一个条件是否使用 OR 连接
+	scopes        []func(*gorm.DB) *gorm.DB
+	or            bool // 下一个条件是否使用 OR 连接
+	useSoftDelete bool
 }
 
 // NewDeleteWrapper 创建删除条件构造器
 func NewDeleteWrapper[T any]() *DeleteWrapper[T] {
 	return &DeleteWrapper[T]{
-		scopes: make([]func(*gorm.DB) *gorm.DB, 0),
-		or:     false,
+		scopes:        make([]func(*gorm.DB) *gorm.DB, 0),
+		or:            false,
+		useSoftDelete: true,
 	}
+}
+
+func (w *DeleteWrapper[T]) UseSoftDelete(enabled bool) *DeleteWrapper[T] {
+	w.useSoftDelete = enabled
+	return w
 }
 
 // addCondition 添加条件 (内部辅助方法)
