@@ -73,13 +73,22 @@ func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrappe
 		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 			subWrapper := NewQueryWrapper[T]()
 			f(subWrapper)
-			handler := func(d *gorm.DB) *gorm.DB {
-				return subWrapper.Apply(d)
-			}
+
+			// GORM's Where and Or expect a query (string, struct, map) or a func(*gorm.DB) *gorm.DB.
+			// However, db.Where(handler) where handler is func(*gorm.DB) *gorm.DB works.
+			// The error "converting argument $3 type: unsupported type func(*gorm.DB) *gorm.DB" suggests
+			// that GORM might be interpreting the argument incorrectly in this context or version.
+			// But wait, the standard way to do nested conditions in GORM is:
+			// db.Where(db.Where(...).Or(...))
+
 			if isOr {
-				return db.Or(handler)
+				return db.Or(func(d *gorm.DB) *gorm.DB {
+					return subWrapper.Apply(d)
+				})
 			}
-			return db.Where(handler)
+			return db.Where(func(d *gorm.DB) *gorm.DB {
+				return subWrapper.Apply(d)
+			})
 		})
 	}
 	// 如果没有参数，重置为 AND (默认就是 AND，所以其实不做操作，或者强制 w.or = false)

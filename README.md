@@ -143,23 +143,99 @@ func main() {
 
 ## 🛠️ Wrapper 方法概览
 
-`QueryWrapper`、`UpdateWrapper`、`DeleteWrapper` 支持大部分常用的 SQL 操作符：
+### QueryWrapper 方法详解
 
-| 方法 | 说明 | 示例 |
-| --- | --- | --- |
-| `Eq` | 等于 = | `w.Eq("name", "Tom")` |
-| `Ne` | 不等于 <> | `w.Ne("status", 1)` |
-| `Gt` / `Ge` | 大于 / 大于等于 | `w.Gt("age", 18)` |
-| `Lt` / `Le` | 小于 / 小于等于 | `w.Lt("score", 60)` |
-| `Like` | 模糊查询 | `w.Like("name", "To")` |
-| `LikeLeft` / `LikeRight` | 左/右模糊 | `w.LikeRight("name", "To")` |
-| `In` / `NotIn` | IN 查询 | `w.In("id", []int{1, 2, 3})` |
-| `Between` / `NotBetween` | 区间查询 | `w.Between("age", 18, 30)` |
-| `IsNull` / `IsNotNull` | NULL 值判断 | `w.IsNull("deleted_at")` |
-| `And` | 嵌套 AND | `w.And(func(sw){...})` |
-| `Or` | OR 连接 | `w.Or()` 或 `w.Or(func(sw){...})` |
-| `OrderByAsc` / `OrderByDesc` | 排序 | `w.OrderByDesc("created_at")` |
-| `Select` | 指定查询字段 | `w.Select("id", "name")` |
+`QueryWrapper` 支持大部分常用的 SQL 操作符，以下是详细的使用说明与 SQL 映射关系：
+
+| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
+| :--- | :--- | :--- | :--- |
+| `Eq` | 等于 = | `w.Eq("name", "Tom")` | `name = 'Tom'` |
+| `Ne` | 不等于 <> | `w.Ne("status", 1)` | `status <> 1` |
+| `Gt` | 大于 > | `w.Gt("age", 18)` | `age > 18` |
+| `Ge` | 大于等于 >= | `w.Ge("age", 18)` | `age >= 18` |
+| `Lt` | 小于 < | `w.Lt("price", 100)` | `price < 100` |
+| `Le` | 小于等于 <= | `w.Le("price", 100)` | `price <= 100` |
+| `Like` | 模糊查询 | `w.Like("name", "k")` | `name LIKE '%k%'` |
+| `LikeLeft` | 左模糊 | `w.LikeLeft("name", "k")` | `name LIKE '%k'` |
+| `LikeRight` | 右模糊 | `w.LikeRight("name", "k")` | `name LIKE 'k%'` |
+| `In` | IN 查询 | `w.In("id", []int{1, 2, 3})` | `id IN (1, 2, 3)` |
+| `NotIn` | NOT IN 查询 | `w.NotIn("id", []int{1, 2})` | `id NOT IN (1, 2)` |
+| `IsNull` | IS NULL | `w.IsNull("deleted_at")` | `deleted_at IS NULL` |
+| `IsNotNull` | IS NOT NULL | `w.IsNotNull("email")` | `email IS NOT NULL` |
+| `Between` | 区间查询 | `w.Between("age", 18, 30)` | `age BETWEEN 18 AND 30` |
+| `NotBetween` | NOT 区间 | `w.NotBetween("age", 18, 30)` | `age NOT BETWEEN 18 AND 30` |
+| `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `a = 1 OR b = 2` |
+| `Or` (嵌套) | OR 嵌套 | `w.Or(func(sw){ sw.Eq("a", 1).Eq("b", 2) })` | `OR (a = 1 AND b = 2)` |
+| `And` | AND 嵌套 | `w.And(func(sw){ sw.Eq("a", 1).Or().Eq("b", 2) })` | `AND (a = 1 OR b = 2)` |
+| `Select` | 指定字段 | `w.Select("id", "name", "age")` | `SELECT id, name, age` |
+| `Distinct` | 去重 | `w.Distinct("age")` | `SELECT DISTINCT age` |
+| `OrderByAsc` | 升序 | `w.OrderByAsc("created_at")` | `ORDER BY created_at ASC` |
+| `OrderByDesc` | 降序 | `w.OrderByDesc("score")` | `ORDER BY score DESC` |
+| `GroupBy` | 分组 | `w.GroupBy("dept_id")` | `GROUP BY dept_id` |
+| `Having` | 分组筛选 | `w.GroupBy("dept").Having("count(*) > ?", 5)` | `GROUP BY dept HAVING count(*) > 5` |
+| `LeftJoin` | 左连接 | `w.LeftJoin("user u", "u.id = order.uid")` | `LEFT JOIN user u ON u.id = order.uid` |
+| `RightJoin` | 右连接 | `w.RightJoin("user u", "u.id = order.uid")` | `RIGHT JOIN user u ON u.id = order.uid` |
+| `InnerJoin` | 内连接 | `w.InnerJoin("user u", "u.id = order.uid")` | `INNER JOIN user u ON u.id = order.uid` |
+| `Table` | 指定表名 | `w.Table("users as u")` | `FROM users as u` |
+
+### UpdateWrapper 方法详解
+
+`UpdateWrapper` 用于构建更新语句，支持设置更新字段 (`Set`) 以及各种 `WHERE` 条件。
+
+| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
+| :--- | :--- | :--- | :--- |
+| `Set` | 设置更新值 | `w.Set("age", 20)` | `SET age = 20` |
+| `SetIncrBy` | 字段自增 | `w.SetIncrBy("count", 1)` | `SET count = count + 1` |
+| `SetDecrBy` | 字段自减 | `w.SetDecrBy("stock", 1)` | `SET stock = stock - 1` |
+| `Eq` | 等于 = | `w.Eq("name", "Tom")` | `WHERE name = 'Tom'` |
+| `Ne` | 不等于 <> | `w.Ne("status", 1)` | `WHERE status <> 1` |
+| `Gt` | 大于 > | `w.Gt("age", 18)` | `WHERE age > 18` |
+| `Ge` | 大于等于 >= | `w.Ge("age", 18)` | `WHERE age >= 18` |
+| `Lt` | 小于 < | `w.Lt("price", 100)` | `WHERE price < 100` |
+| `Le` | 小于等于 <= | `w.Le("price", 100)` | `WHERE price <= 100` |
+| `Like` | 模糊查询 | `w.Like("name", "k")` | `WHERE name LIKE '%k%'` |
+| `LikeLeft` | 左模糊 | `w.LikeLeft("name", "k")` | `WHERE name LIKE '%k'` |
+| `LikeRight` | 右模糊 | `w.LikeRight("name", "k")` | `WHERE name LIKE 'k%'` |
+| `In` | IN 查询 | `w.In("id", []int{1, 2})` | `WHERE id IN (1, 2)` |
+| `NotIn` | NOT IN 查询 | `w.NotIn("id", []int{1, 2})` | `WHERE id NOT IN (1, 2)` |
+| `IsNull` | IS NULL | `w.IsNull("deleted_at")` | `WHERE deleted_at IS NULL` |
+| `IsNotNull` | IS NOT NULL | `w.IsNotNull("email")` | `WHERE email IS NOT NULL` |
+| `Between` | 区间查询 | `w.Between("age", 18, 30)` | `WHERE age BETWEEN 18 AND 30` |
+| `NotBetween` | NOT 区间 | `w.NotBetween("age", 18, 30)` | `WHERE age NOT BETWEEN 18 AND 30` |
+| `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `WHERE a = 1 OR b = 2` |
+| `And` | AND 嵌套 | `w.And(func(sw){...})` | `WHERE ... AND (...)` |
+
+### DeleteWrapper 方法详解
+
+`DeleteWrapper` 用于构建删除语句，支持各种 `WHERE` 条件。
+
+| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
+| :--- | :--- | :--- | :--- |
+| `Eq` | 等于 = | `w.Eq("name", "Tom")` | `WHERE name = 'Tom'` |
+| `Ne` | 不等于 <> | `w.Ne("status", 1)` | `WHERE status <> 1` |
+| `Gt` | 大于 > | `w.Gt("age", 18)` | `WHERE age > 18` |
+| `Ge` | 大于等于 >= | `w.Ge("age", 18)` | `WHERE age >= 18` |
+| `Lt` | 小于 < | `w.Lt("price", 100)` | `WHERE price < 100` |
+| `Le` | 小于等于 <= | `w.Le("price", 100)` | `WHERE price <= 100` |
+| `Like` | 模糊查询 | `w.Like("name", "k")` | `WHERE name LIKE '%k%'` |
+| `LikeLeft` | 左模糊 | `w.LikeLeft("name", "k")` | `WHERE name LIKE '%k'` |
+| `LikeRight` | 右模糊 | `w.LikeRight("name", "k")` | `WHERE name LIKE 'k%'` |
+| `In` | IN 查询 | `w.In("id", []int{1, 2})` | `WHERE id IN (1, 2)` |
+| `NotIn` | NOT IN 查询 | `w.NotIn("id", []int{1, 2})` | `WHERE id NOT IN (1, 2)` |
+| `IsNull` | IS NULL | `w.IsNull("deleted_at")` | `WHERE deleted_at IS NULL` |
+| `IsNotNull` | IS NOT NULL | `w.IsNotNull("email")` | `WHERE email IS NOT NULL` |
+| `Between` | 区间查询 | `w.Between("age", 18, 30)` | `WHERE age BETWEEN 18 AND 30` |
+| `NotBetween` | NOT 区间 | `w.NotBetween("age", 18, 30)` | `WHERE age NOT BETWEEN 18 AND 30` |
+| `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `WHERE a = 1 OR b = 2` |
+| `And` | AND 嵌套 | `w.And(func(sw){...})` | `WHERE ... AND (...)` |
+
+### InsertWrapper 方法详解
+
+`InsertWrapper` 用于构建插入语句，主要用于指定插入的字段和值。
+
+| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
+| :--- | :--- | :--- | :--- |
+| `Set` | 设置插入值 | `w.Set("name", "Tom")` | `INSERT INTO ... (name) VALUES ('Tom')` |
 
 > **提示**: 所有方法最后一个参数支持传入 `bool` 类型条件。例如：`w.Eq("name", name, name != "")`，只有当 `name != ""` 为 true 时，该条件才会生效。
 
