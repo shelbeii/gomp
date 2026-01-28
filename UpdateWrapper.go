@@ -44,7 +44,7 @@ func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrap
 			subWrapper := NewUpdateWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
+			var conditionFunc = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
 
@@ -69,7 +69,7 @@ func (w *UpdateWrapper[T]) And(conditions ...func(*UpdateWrapper[T])) *UpdateWra
 			subWrapper := NewUpdateWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
+			var conditionFunc = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
 

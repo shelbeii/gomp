@@ -42,7 +42,7 @@ func (w *DeleteWrapper[T]) Or(conditions ...func(*DeleteWrapper[T])) *DeleteWrap
 			subWrapper := NewDeleteWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
+			var conditionFunc = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
 
@@ -67,7 +67,7 @@ func (w *DeleteWrapper[T]) And(conditions ...func(*DeleteWrapper[T])) *DeleteWra
 			subWrapper := NewDeleteWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
+			var conditionFunc = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
 

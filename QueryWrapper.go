@@ -46,7 +46,7 @@ func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper
 			subWrapper := NewQueryWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
+			var conditionFunc = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
 
@@ -72,7 +72,7 @@ func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrappe
 			subWrapper := NewQueryWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
+			var conditionFunc = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
 
