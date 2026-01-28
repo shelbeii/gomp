@@ -1,4 +1,4 @@
-# GOMP (GORM Plus)
+# GOMP (GO MyBatis-Plus)
 
 GOMP 是一个基于 [GORM](https://gorm.io/) 的增强库，灵感来源于 MyBatis-Plus。它旨在简化 GORM 的开发流程，提供类似于 MyBatis-Plus 的链式查询构造器（Wrapper）和通用的 Service 层 CRUD 接口。
 
