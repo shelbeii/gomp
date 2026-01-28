@@ -41,13 +41,15 @@ func (w *DeleteWrapper[T]) Or(conditions ...func(*DeleteWrapper[T])) *DeleteWrap
 		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 			subWrapper := NewDeleteWrapper[T]()
 			f(subWrapper)
-			handler := func(d *gorm.DB) *gorm.DB {
+
+			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
+
 			if isOr {
-				return db.Or(handler)
+				return db.Or(conditionFunc)
 			}
-			return db.Or(handler)
+			return db.Or(conditionFunc)
 		})
 		return w
 	}
@@ -64,13 +66,15 @@ func (w *DeleteWrapper[T]) And(conditions ...func(*DeleteWrapper[T])) *DeleteWra
 		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 			subWrapper := NewDeleteWrapper[T]()
 			f(subWrapper)
-			handler := func(d *gorm.DB) *gorm.DB {
+
+			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
+
 			if isOr {
-				return db.Or(handler)
+				return db.Or(conditionFunc)
 			}
-			return db.Where(handler)
+			return db.Where(conditionFunc)
 		})
 	}
 	w.or = false

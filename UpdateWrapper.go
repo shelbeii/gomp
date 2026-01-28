@@ -43,13 +43,15 @@ func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrap
 		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 			subWrapper := NewUpdateWrapper[T]()
 			f(subWrapper)
-			handler := func(d *gorm.DB) *gorm.DB {
+
+			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
+
 			if isOr {
-				return db.Or(handler)
+				return db.Or(conditionFunc)
 			}
-			return db.Or(handler)
+			return db.Or(conditionFunc)
 		})
 		return w
 	}
@@ -66,13 +68,15 @@ func (w *UpdateWrapper[T]) And(conditions ...func(*UpdateWrapper[T])) *UpdateWra
 		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 			subWrapper := NewUpdateWrapper[T]()
 			f(subWrapper)
-			handler := func(d *gorm.DB) *gorm.DB {
+
+			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
+
 			if isOr {
-				return db.Or(handler)
+				return db.Or(conditionFunc)
 			}
-			return db.Where(handler)
+			return db.Where(conditionFunc)
 		})
 	}
 	w.or = false

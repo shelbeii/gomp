@@ -45,17 +45,15 @@ func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper
 		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 			subWrapper := NewQueryWrapper[T]()
 			f(subWrapper)
-			handler := func(d *gorm.DB) *gorm.DB {
+
+			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
 				return subWrapper.Apply(d)
 			}
+
 			if isOr {
-				// 此时是 OR ( OR (...) ) ? 通常 Or(func) 自身就是一个 OR 块
-				// 如果前一个也是 Or(), 则 db.Or(db.Or(...)) -> ... OR OR ... (invalid)
-				// GORM behavior: db.Or(handler) adds "OR (...)"
-				return db.Or(handler)
+				return db.Or(conditionFunc)
 			}
-			// 如果没有显式 Or() 前缀，Or(func) 作为一个方法本身就是添加 OR 条件
-			return db.Or(handler)
+			return db.Or(conditionFunc)
 		})
 		return w
 	}
@@ -74,21 +72,14 @@ func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrappe
 			subWrapper := NewQueryWrapper[T]()
 			f(subWrapper)
 
-			// GORM's Where and Or expect a query (string, struct, map) or a func(*gorm.DB) *gorm.DB.
-			// However, db.Where(handler) where handler is func(*gorm.DB) *gorm.DB works.
-			// The error "converting argument $3 type: unsupported type func(*gorm.DB) *gorm.DB" suggests
-			// that GORM might be interpreting the argument incorrectly in this context or version.
-			// But wait, the standard way to do nested conditions in GORM is:
-			// db.Where(db.Where(...).Or(...))
+			var conditionFunc func(*gorm.DB) *gorm.DB = func(d *gorm.DB) *gorm.DB {
+				return subWrapper.Apply(d)
+			}
 
 			if isOr {
-				return db.Or(func(d *gorm.DB) *gorm.DB {
-					return subWrapper.Apply(d)
-				})
+				return db.Or(conditionFunc)
 			}
-			return db.Where(func(d *gorm.DB) *gorm.DB {
-				return subWrapper.Apply(d)
-			})
+			return db.Where(conditionFunc)
 		})
 	}
 	// 如果没有参数，重置为 AND (默认就是 AND，所以其实不做操作，或者强制 w.or = false)
