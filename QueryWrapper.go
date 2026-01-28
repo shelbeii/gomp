@@ -46,14 +46,12 @@ func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper
 			subWrapper := NewQueryWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc = func(d *gorm.DB) *gorm.DB {
-				return subWrapper.Apply(d)
-			}
+			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
 
 			if isOr {
-				return db.Or(conditionFunc)
+				return db.Or(subDB)
 			}
-			return db.Or(conditionFunc)
+			return db.Or(subDB)
 		})
 		return w
 	}
@@ -72,14 +70,12 @@ func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrappe
 			subWrapper := NewQueryWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc = func(d *gorm.DB) *gorm.DB {
-				return subWrapper.Apply(d)
-			}
+			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
 
 			if isOr {
-				return db.Or(conditionFunc)
+				return db.Or(subDB)
 			}
-			return db.Where(conditionFunc)
+			return db.Where(subDB)
 		})
 	}
 	// 如果没有参数，重置为 AND (默认就是 AND，所以其实不做操作，或者强制 w.or = false)

@@ -42,14 +42,12 @@ func (w *DeleteWrapper[T]) Or(conditions ...func(*DeleteWrapper[T])) *DeleteWrap
 			subWrapper := NewDeleteWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc = func(d *gorm.DB) *gorm.DB {
-				return subWrapper.Apply(d)
-			}
+			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
 
 			if isOr {
-				return db.Or(conditionFunc)
+				return db.Or(subDB)
 			}
-			return db.Or(conditionFunc)
+			return db.Or(subDB)
 		})
 		return w
 	}
@@ -67,14 +65,12 @@ func (w *DeleteWrapper[T]) And(conditions ...func(*DeleteWrapper[T])) *DeleteWra
 			subWrapper := NewDeleteWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc = func(d *gorm.DB) *gorm.DB {
-				return subWrapper.Apply(d)
-			}
+			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
 
 			if isOr {
-				return db.Or(conditionFunc)
+				return db.Or(subDB)
 			}
-			return db.Where(conditionFunc)
+			return db.Where(subDB)
 		})
 	}
 	w.or = false

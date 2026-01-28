@@ -44,14 +44,12 @@ func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrap
 			subWrapper := NewUpdateWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc = func(d *gorm.DB) *gorm.DB {
-				return subWrapper.Apply(d)
-			}
+			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
 
 			if isOr {
-				return db.Or(conditionFunc)
+				return db.Or(subDB)
 			}
-			return db.Or(conditionFunc)
+			return db.Or(subDB)
 		})
 		return w
 	}
@@ -69,14 +67,12 @@ func (w *UpdateWrapper[T]) And(conditions ...func(*UpdateWrapper[T])) *UpdateWra
 			subWrapper := NewUpdateWrapper[T]()
 			f(subWrapper)
 
-			var conditionFunc = func(d *gorm.DB) *gorm.DB {
-				return subWrapper.Apply(d)
-			}
+			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
 
 			if isOr {
-				return db.Or(conditionFunc)
+				return db.Or(subDB)
 			}
-			return db.Where(conditionFunc)
+			return db.Where(subDB)
 		})
 	}
 	w.or = false
