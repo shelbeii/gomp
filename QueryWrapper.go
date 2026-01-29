@@ -2,6 +2,7 @@ package gomp
 
 import (
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -20,6 +21,219 @@ func NewQueryWrapper[T any]() *QueryWrapper[T] {
 		selects: make([]string, 0),
 		or:      false,
 	}
+}
+
+type JoinOnWrapper struct {
+	conditions []joinCondition
+	or         bool
+}
+
+type joinCondition struct {
+	query string
+	args  []any
+	isOr  bool
+}
+
+func NewJoinOnWrapper() *JoinOnWrapper {
+	return &JoinOnWrapper{
+		conditions: make([]joinCondition, 0),
+		or:         false,
+	}
+}
+
+func (w *JoinOnWrapper) addCondition(query string, args ...any) {
+	if strings.TrimSpace(query) == "" {
+		w.or = false
+		return
+	}
+	isOr := w.or
+	w.or = false
+	w.conditions = append(w.conditions, joinCondition{query: query, args: args, isOr: isOr})
+}
+
+func (w *JoinOnWrapper) Or(conditions ...func(*JoinOnWrapper)) *JoinOnWrapper {
+	if len(conditions) > 0 {
+		f := conditions[0]
+		sub := NewJoinOnWrapper()
+		f(sub)
+		clause, args := sub.Build()
+		if strings.TrimSpace(clause) != "" {
+			w.addCondition("("+clause+")", args...)
+		}
+		return w
+	}
+	w.or = true
+	return w
+}
+
+func (w *JoinOnWrapper) And(conditions ...func(*JoinOnWrapper)) *JoinOnWrapper {
+	if len(conditions) > 0 {
+		f := conditions[0]
+		sub := NewJoinOnWrapper()
+		f(sub)
+		clause, args := sub.Build()
+		if strings.TrimSpace(clause) != "" {
+			w.addCondition("("+clause+")", args...)
+		}
+		return w
+	}
+	w.or = false
+	return w
+}
+
+func (w *JoinOnWrapper) Raw(query string, args ...any) *JoinOnWrapper {
+	w.addCondition(query, args...)
+	return w
+}
+
+func (w *JoinOnWrapper) Eq(column string, val any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s = ?", column), val)
+	return w
+}
+
+func (w *JoinOnWrapper) EqColumn(leftColumn string, rightColumn string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s = %s", leftColumn, rightColumn))
+	return w
+}
+
+func (w *JoinOnWrapper) Ne(column string, val any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s <> ?", column), val)
+	return w
+}
+
+func (w *JoinOnWrapper) Gt(column string, val any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s > ?", column), val)
+	return w
+}
+
+func (w *JoinOnWrapper) Ge(column string, val any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s >= ?", column), val)
+	return w
+}
+
+func (w *JoinOnWrapper) Lt(column string, val any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s < ?", column), val)
+	return w
+}
+
+func (w *JoinOnWrapper) Le(column string, val any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s <= ?", column), val)
+	return w
+}
+
+func (w *JoinOnWrapper) Like(column string, val string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val+"%")
+	return w
+}
+
+func (w *JoinOnWrapper) LikeLeft(column string, val string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val)
+	return w
+}
+
+func (w *JoinOnWrapper) LikeRight(column string, val string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s LIKE ?", column), val+"%")
+	return w
+}
+
+func (w *JoinOnWrapper) In(column string, val any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s IN (?)", column), val)
+	return w
+}
+
+func (w *JoinOnWrapper) NotIn(column string, val any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s NOT IN (?)", column), val)
+	return w
+}
+
+func (w *JoinOnWrapper) IsNull(column string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s IS NULL", column))
+	return w
+}
+
+func (w *JoinOnWrapper) IsNotNull(column string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s IS NOT NULL", column))
+	return w
+}
+
+func (w *JoinOnWrapper) Between(column string, val1, val2 any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s BETWEEN ? AND ?", column), val1, val2)
+	return w
+}
+
+func (w *JoinOnWrapper) NotBetween(column string, val1, val2 any, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(fmt.Sprintf("%s NOT BETWEEN ? AND ?", column), val1, val2)
+	return w
+}
+
+func (w *JoinOnWrapper) Build() (string, []any) {
+	if len(w.conditions) == 0 {
+		return "", nil
+	}
+	var sb strings.Builder
+	args := make([]any, 0)
+	for i, c := range w.conditions {
+		if i > 0 {
+			if c.isOr {
+				sb.WriteString(" OR ")
+			} else {
+				sb.WriteString(" AND ")
+			}
+		}
+		sb.WriteString(c.query)
+		if len(c.args) > 0 {
+			args = append(args, c.args...)
+		}
+	}
+	return sb.String(), args
 }
 
 // addCondition 添加条件 (内部辅助方法)
@@ -295,6 +509,60 @@ func (w *QueryWrapper[T]) RightJoin(table string, leftColumn string, rightColumn
 func (w *QueryWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+	})
+	return w
+}
+
+func (w *QueryWrapper[T]) LeftJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		onWrapper := NewJoinOnWrapper()
+		onWrapper.EqColumn(leftColumn, rightColumn)
+		for _, b := range builders {
+			if b != nil {
+				b(onWrapper)
+			}
+		}
+		onClause, args := onWrapper.Build()
+		if strings.TrimSpace(onClause) == "" {
+			return db
+		}
+		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s", table, onClause), args...)
+	})
+	return w
+}
+
+func (w *QueryWrapper[T]) RightJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		onWrapper := NewJoinOnWrapper()
+		onWrapper.EqColumn(leftColumn, rightColumn)
+		for _, b := range builders {
+			if b != nil {
+				b(onWrapper)
+			}
+		}
+		onClause, args := onWrapper.Build()
+		if strings.TrimSpace(onClause) == "" {
+			return db
+		}
+		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s", table, onClause), args...)
+	})
+	return w
+}
+
+func (w *QueryWrapper[T]) InnerJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		onWrapper := NewJoinOnWrapper()
+		onWrapper.EqColumn(leftColumn, rightColumn)
+		for _, b := range builders {
+			if b != nil {
+				b(onWrapper)
+			}
+		}
+		onClause, args := onWrapper.Build()
+		if strings.TrimSpace(onClause) == "" {
+			return db
+		}
+		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s", table, onClause), args...)
 	})
 	return w
 }

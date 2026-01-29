@@ -176,7 +176,104 @@ func main() {
 | `LeftJoin` | 左连接 | `w.LeftJoin("user u", "u.id = order.uid")` | `LEFT JOIN user u ON u.id = order.uid` |
 | `RightJoin` | 右连接 | `w.RightJoin("user u", "u.id = order.uid")` | `RIGHT JOIN user u ON u.id = order.uid` |
 | `InnerJoin` | 内连接 | `w.InnerJoin("user u", "u.id = order.uid")` | `INNER JOIN user u ON u.id = order.uid` |
+| `LeftJoinOn` | 左连接(条件构造器) | `w.LeftJoinOn("user u", "u.id", "order.uid", func(on *gomp.JoinOnWrapper){ on.Gt("order.amount", 100) })` | `LEFT JOIN user u ON u.id = order.uid AND order.amount > 100` |
+| `RightJoinOn` | 右连接(条件构造器) | `w.RightJoinOn("user u", "u.id", "order.uid", func(on *gomp.JoinOnWrapper){ on.Or().IsNull("order.deleted_at") })` | `RIGHT JOIN user u ON u.id = order.uid OR order.deleted_at IS NULL` |
+| `InnerJoinOn` | 内连接(条件构造器) | `w.InnerJoinOn("user u", "u.id", "order.uid", func(on *gomp.JoinOnWrapper){ on.And(func(sw *gomp.JoinOnWrapper){ sw.Gt("order.amount", 100).Or().Gt("order.discount", 0) }) })` | `INNER JOIN user u ON u.id = order.uid AND (order.amount > 100 OR order.discount > 0)` |
 | `Table` | 指定表名 | `w.Table("users as u")` | `FROM users as u` |
+
+**Join 条件构造器（JoinOnWrapper）**
+
+`JoinOnWrapper` 用于拼接 JOIN 的 ON 条件，支持 AND / OR 混合与分组，减少手写 SQL 拼接错误。与 `LeftJoinOn` / `RightJoinOn` / `InnerJoinOn` 搭配使用。
+
+**基础用法**（生成的 SQL）
+
+```go
+w.LeftJoinOn(
+    "t_purchase_contract_component pcc",
+    "pcc.id",
+    "ind.purchase_contract_component_id",
+    func(on *gomp.JoinOnWrapper) {
+        on.Gt("ind.purchase_contract_component_id", 0).
+            And(func(sw *gomp.JoinOnWrapper) {
+                sw.Gt("pcc.id", 0).Or().IsNull("pcc.deleted_at")
+            })
+    },
+)
+```
+对应 SQL：
+```
+LEFT JOIN t_purchase_contract_component pcc
+  ON pcc.id = ind.purchase_contract_component_id
+ AND ind.purchase_contract_component_id > 0
+ AND (pcc.id > 0 OR pcc.deleted_at IS NULL)
+```
+
+**OR 分组示例**（生成的 SQL）
+
+```go
+w.InnerJoinOn(
+    "t_integration_notice_detail ind",
+    "ind.id",
+    "pdod.integration_notice_detail_id",
+    func(on *gomp.JoinOnWrapper) {
+        on.And(func(sw *gomp.JoinOnWrapper) {
+            sw.Eq("ind.notice_status", "4").Or().Eq("ind.notice_status", "5")
+        })
+    },
+)
+```
+对应 SQL：
+```
+INNER JOIN t_integration_notice_detail ind
+  ON ind.id = pdod.integration_notice_detail_id
+ AND (ind.notice_status = '4' OR ind.notice_status = '5')
+```
+
+**多条件混合示例**（生成的 SQL）
+
+```go
+w.RightJoinOn(
+    "t_order o",
+    "o.user_id",
+    "u.id",
+    func(on *gomp.JoinOnWrapper) {
+        on.IsNull("o.deleted_at").
+           And(func(sw *gomp.JoinOnWrapper){ sw.Gt("o.amount", 100).Or().Gt("o.discount", 0) }).
+           And(func(sw *gomp.JoinOnWrapper){ sw.Raw("o.status IN ('paid','shipped')") })
+    },
+)
+```
+对应 SQL：
+```
+RIGHT JOIN t_order o
+  ON o.user_id = u.id
+ AND o.deleted_at IS NULL
+ AND (o.amount > 100 OR o.discount > 0)
+ AND (o.status IN ('paid','shipped'))
+```
+**JoinOnWrapper 常用方法**
+
+| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
+| :--- | :--- | :--- | :--- |
+| `Eq` | 等于 = | `on.Eq("a.id", 1)` | `a.id = 1` |
+| `EqColumn` | 列等于列 | `on.EqColumn("a.id", "b.a_id")` | `a.id = b.a_id` |
+| `Ne` | 不等于 <> | `on.Ne("a.status", 1)` | `a.status <> 1` |
+| `Gt` | 大于 > | `on.Gt("a.amount", 10)` | `a.amount > 10` |
+| `Ge` | 大于等于 >= | `on.Ge("a.amount", 10)` | `a.amount >= 10` |
+| `Lt` | 小于 < | `on.Lt("a.amount", 10)` | `a.amount < 10` |
+| `Le` | 小于等于 <= | `on.Le("a.amount", 10)` | `a.amount <= 10` |
+| `Like` | 模糊查询 | `on.Like("a.name", "k")` | `a.name LIKE '%k%'` |
+| `LikeLeft` | 左模糊 | `on.LikeLeft("a.name", "k")` | `a.name LIKE '%k'` |
+| `LikeRight` | 右模糊 | `on.LikeRight("a.name", "k")` | `a.name LIKE 'k%'` |
+| `In` | IN 查询 | `on.In("a.id", []int{1,2})` | `a.id IN (1,2)` |
+| `NotIn` | NOT IN 查询 | `on.NotIn("a.id", []int{1,2})` | `a.id NOT IN (1,2)` |
+| `IsNull` | IS NULL | `on.IsNull("a.deleted_at")` | `a.deleted_at IS NULL` |
+| `IsNotNull` | IS NOT NULL | `on.IsNotNull("a.deleted_at")` | `a.deleted_at IS NOT NULL` |
+| `Between` | 区间查询 | `on.Between("a.score", 1, 10)` | `a.score BETWEEN 1 AND 10` |
+| `NotBetween` | NOT 区间 | `on.NotBetween("a.score", 1, 10)` | `a.score NOT BETWEEN 1 AND 10` |
+| `Or` | OR 连接 | `on.Eq("a.type", 1).Or().Eq("a.type", 2)` | `a.type = 1 OR a.type = 2` |
+| `And` | AND 分组 | `on.And(func(sw *gomp.JoinOnWrapper){...})` | `AND (...)` |
+| `Raw` | 原始条件 | `on.Raw("a.flag = 1")` | `a.flag = 1` |
 
 ### UpdateWrapper 方法详解
 
