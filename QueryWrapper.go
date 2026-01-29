@@ -276,25 +276,25 @@ func (w *QueryWrapper[T]) Select(columns ...string) *QueryWrapper[T] {
 }
 
 // LeftJoin 左连接
-func (w *QueryWrapper[T]) LeftJoin(table string, on string) *QueryWrapper[T] {
+func (w *QueryWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s", table, on))
+		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
 	})
 	return w
 }
 
 // RightJoin 右连接
-func (w *QueryWrapper[T]) RightJoin(table string, on string) *QueryWrapper[T] {
+func (w *QueryWrapper[T]) RightJoin(table string, leftColumn string, rightColumn string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s", table, on))
+		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
 	})
 	return w
 }
 
 // InnerJoin 内连接
-func (w *QueryWrapper[T]) InnerJoin(table string, on string) *QueryWrapper[T] {
+func (w *QueryWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s", table, on))
+		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s = %s", table, leftColumn, rightColumn))
 	})
 	return w
 }
