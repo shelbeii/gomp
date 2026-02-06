@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // DeleteWrapper 删除条件构造器
@@ -12,6 +13,8 @@ type DeleteWrapper[T any] struct {
 	scopes        []func(*gorm.DB) *gorm.DB
 	or            bool // 下一个条件是否使用 OR 连接
 	useSoftDelete bool
+	tableName     string
+	joinClauses   []string
 }
 
 // NewDeleteWrapper 创建删除条件构造器
@@ -20,14 +23,13 @@ func NewDeleteWrapper[T any]() *DeleteWrapper[T] {
 		scopes:        make([]func(*gorm.DB) *gorm.DB, 0),
 		or:            false,
 		useSoftDelete: true,
+		joinClauses:   make([]string, 0),
 	}
 }
 
 // Table 指定表名 (用于设置别名等)
 func (w *DeleteWrapper[T]) Table(name string) *DeleteWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Table(name)
-	})
+	w.tableName = name
 	return w
 }
 
@@ -230,25 +232,19 @@ func (w *DeleteWrapper[T]) NotBetween(column string, val1, val2 any, condition .
 
 // LeftJoin 左连接
 func (w *DeleteWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
-	})
+	w.joinClauses = append(w.joinClauses, fmt.Sprintf("LEFT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
 	return w
 }
 
 // RightJoin 右连接
 func (w *DeleteWrapper[T]) RightJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
-	})
+	w.joinClauses = append(w.joinClauses, fmt.Sprintf("RIGHT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
 	return w
 }
 
 // InnerJoin 内连接
 func (w *DeleteWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s = %s", table, leftColumn, rightColumn))
-	})
+	w.joinClauses = append(w.joinClauses, fmt.Sprintf("INNER JOIN %s ON %s = %s", table, leftColumn, rightColumn))
 	return w
 }
 
@@ -314,5 +310,46 @@ func (w *DeleteWrapper[T]) Apply(db *gorm.DB) *gorm.DB {
 	for _, scope := range w.scopes {
 		db = scope(db)
 	}
+
+	// 处理连接查询 (GORM Delete 默认忽略 Joins，需手动合并到 Table)
+	if len(w.joinClauses) > 0 {
+		fullTable := w.tableName
+		if fullTable == "" {
+			// 如果没有显式设置表名，尝试从 model 获取 (注意：这里假设 db 已经绑定了 model，或者由 Service 设置)
+			// 但 Apply 时 db 可能还没有 model 信息，或者 model 是 T
+			// 简单起见，如果使用了 Join，建议必须使用 Table()
+			// 这里我们只能处理设置了 Table 的情况，否则只能依赖 GORM (可能失效)
+		}
+
+		if fullTable != "" {
+			sb := strings.Builder{}
+			sb.WriteString(fullTable)
+			for _, join := range w.joinClauses {
+				sb.WriteString(" ")
+				sb.WriteString(join)
+			}
+			db = db.Table(sb.String())
+
+			// 针对 MySQL 的 DELETE alias FROM ... 语法修复
+			// 如果是 MySQL 且表名包含别名 (有空格)，则尝试添加 Delete Clause
+			if db.Dialector.Name() == "mysql" {
+				parts := strings.Fields(fullTable)
+				if len(parts) >= 2 {
+					// 假设最后一个部分是别名
+					alias := parts[len(parts)-1]
+					// 简单的别名检查，避免关键字等误判 (用户应保证别名合法)
+					db = db.Clauses(clause.Delete{Modifier: alias})
+				}
+			}
+		} else {
+			// 如果没设置表名，尝试回退到 standard Joins (虽然 Delete 可能忽略)
+			for _, join := range w.joinClauses {
+				db = db.Joins(join)
+			}
+		}
+	} else if w.tableName != "" {
+		db = db.Table(w.tableName)
+	}
+
 	return db
 }
