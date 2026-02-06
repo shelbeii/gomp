@@ -302,6 +302,33 @@ RIGHT JOIN t_order o
 | `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `WHERE a = 1 OR b = 2` |
 | `And` | AND 嵌套 | `w.And(func(sw){...})` | `WHERE ... AND (...)` |
 
+#### 联表更新示例
+
+`UpdateWrapper` 支持 `Join` 语法，可实现多表关联更新。
+
+**简单关联更新**
+
+```go
+// UPDATE user u LEFT JOIN order o ON o.user_id = u.id SET u.email = 'vip@example.com' WHERE o.amount > 1000
+updater := gomp.NewUpdateWrapper[model.User]()
+updater.LeftJoin("order o", "o.user_id", "u.id").
+        Set("u.email", "vip@example.com").
+        Gt("o.amount", 1000)
+userService.Update(ctx, updater)
+```
+
+**复杂条件关联更新**
+
+```go
+// 使用 LeftJoinOn 自定义 ON 条件
+updater := gomp.NewUpdateWrapper[model.User]()
+updater.LeftJoinOn("order o", "o.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
+    on.Gt("o.amount", 1000).Or().Eq("o.status", "paid")
+}).Set("u.vip_level", 2)
+
+userService.Update(ctx, updater)
+```
+
 ### DeleteWrapper 方法详解
 
 `DeleteWrapper` 用于构建删除语句，支持各种 `WHERE` 条件。
@@ -325,6 +352,32 @@ RIGHT JOIN t_order o
 | `NotBetween` | NOT 区间 | `w.NotBetween("age", 18, 30)` | `WHERE age NOT BETWEEN 18 AND 30` |
 | `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `WHERE a = 1 OR b = 2` |
 | `And` | AND 嵌套 | `w.And(func(sw){...})` | `WHERE ... AND (...)` |
+
+#### 联表删除示例
+
+`DeleteWrapper` 支持 `Join` 语法，可实现多表关联删除。
+
+**简单关联删除**
+
+```go
+// DELETE u FROM user u LEFT JOIN order o ON o.user_id = u.id WHERE o.status = 'cancelled'
+deleter := gomp.NewDeleteWrapper[model.User]()
+deleter.LeftJoin("order o", "o.user_id", "u.id").
+        Eq("o.status", "cancelled")
+userService.Delete(ctx, deleter)
+```
+
+**复杂条件关联删除**
+
+```go
+// 使用 LeftJoinOn 自定义 ON 条件
+deleter := gomp.NewDeleteWrapper[model.User]()
+deleter.LeftJoinOn("login_log l", "l.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
+    on.Lt("l.login_time", "2023-01-01")
+}).IsNull("u.active_at") // 删除很久没登录且未激活的用户
+
+userService.Delete(ctx, deleter)
+```
 
 ### InsertWrapper 方法详解
 

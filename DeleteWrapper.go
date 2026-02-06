@@ -2,6 +2,7 @@ package gomp
 
 import (
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 )
@@ -216,6 +217,87 @@ func (w *DeleteWrapper[T]) NotBetween(column string, val1, val2 any, condition .
 		return w
 	}
 	w.addCondition(fmt.Sprintf("%s NOT BETWEEN ? AND ?", column), val1, val2)
+	return w
+}
+
+// LeftJoin 左连接
+func (w *DeleteWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+	})
+	return w
+}
+
+// RightJoin 右连接
+func (w *DeleteWrapper[T]) RightJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+	})
+	return w
+}
+
+// InnerJoin 内连接
+func (w *DeleteWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+	})
+	return w
+}
+
+// LeftJoinOn 左连接(自定义条件)
+func (w *DeleteWrapper[T]) LeftJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		onWrapper := NewJoinOnWrapper()
+		onWrapper.EqColumn(leftColumn, rightColumn)
+		for _, b := range builders {
+			if b != nil {
+				b(onWrapper)
+			}
+		}
+		onClause, args := onWrapper.Build()
+		if strings.TrimSpace(onClause) == "" {
+			return db
+		}
+		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s", table, onClause), args...)
+	})
+	return w
+}
+
+// RightJoinOn 右连接(自定义条件)
+func (w *DeleteWrapper[T]) RightJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		onWrapper := NewJoinOnWrapper()
+		onWrapper.EqColumn(leftColumn, rightColumn)
+		for _, b := range builders {
+			if b != nil {
+				b(onWrapper)
+			}
+		}
+		onClause, args := onWrapper.Build()
+		if strings.TrimSpace(onClause) == "" {
+			return db
+		}
+		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s", table, onClause), args...)
+	})
+	return w
+}
+
+// InnerJoinOn 内连接(自定义条件)
+func (w *DeleteWrapper[T]) InnerJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		onWrapper := NewJoinOnWrapper()
+		onWrapper.EqColumn(leftColumn, rightColumn)
+		for _, b := range builders {
+			if b != nil {
+				b(onWrapper)
+			}
+		}
+		onClause, args := onWrapper.Build()
+		if strings.TrimSpace(onClause) == "" {
+			return db
+		}
+		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s", table, onClause), args...)
+	})
 	return w
 }
 
