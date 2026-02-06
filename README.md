@@ -301,6 +301,7 @@ RIGHT JOIN t_order o
 | `NotBetween` | NOT 区间 | `w.NotBetween("age", 18, 30)` | `WHERE age NOT BETWEEN 18 AND 30` |
 | `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `WHERE a = 1 OR b = 2` |
 | `And` | AND 嵌套 | `w.And(func(sw){...})` | `WHERE ... AND (...)` |
+| `Table` | 指定表名 | `w.Table("users u")` | `FROM users u` |
 
 #### 联表更新示例
 
@@ -311,7 +312,8 @@ RIGHT JOIN t_order o
 ```go
 // UPDATE user u LEFT JOIN order o ON o.user_id = u.id SET u.email = 'vip@example.com' WHERE o.amount > 1000
 updater := gomp.NewUpdateWrapper[model.User]()
-updater.LeftJoin("order o", "o.user_id", "u.id").
+updater.Table("user u"). // 显式指定别名 u
+        LeftJoin("order o", "o.user_id", "u.id").
         Set("u.email", "vip@example.com").
         Gt("o.amount", 1000)
 userService.Update(ctx, updater)
@@ -322,9 +324,10 @@ userService.Update(ctx, updater)
 ```go
 // 使用 LeftJoinOn 自定义 ON 条件
 updater := gomp.NewUpdateWrapper[model.User]()
-updater.LeftJoinOn("order o", "o.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
-    on.Gt("o.amount", 1000).Or().Eq("o.status", "paid")
-}).Set("u.vip_level", 2)
+updater.Table("user u").
+        LeftJoinOn("order o", "o.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
+            on.Gt("o.amount", 1000).Or().Eq("o.status", "paid")
+        }).Set("u.vip_level", 2)
 
 userService.Update(ctx, updater)
 ```
@@ -362,7 +365,8 @@ userService.Update(ctx, updater)
 ```go
 // DELETE u FROM user u LEFT JOIN order o ON o.user_id = u.id WHERE o.status = 'cancelled'
 deleter := gomp.NewDeleteWrapper[model.User]()
-deleter.LeftJoin("order o", "o.user_id", "u.id").
+deleter.Table("user u"). // 显式指定别名 u
+        LeftJoin("order o", "o.user_id", "u.id").
         Eq("o.status", "cancelled")
 userService.Delete(ctx, deleter)
 ```
@@ -372,9 +376,10 @@ userService.Delete(ctx, deleter)
 ```go
 // 使用 LeftJoinOn 自定义 ON 条件
 deleter := gomp.NewDeleteWrapper[model.User]()
-deleter.LeftJoinOn("login_log l", "l.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
-    on.Lt("l.login_time", "2023-01-01")
-}).IsNull("u.active_at") // 删除很久没登录且未激活的用户
+deleter.Table("user u").
+        LeftJoinOn("login_log l", "l.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
+            on.Lt("l.login_time", "2023-01-01")
+        }).IsNull("u.active_at") // 删除很久没登录且未激活的用户
 
 userService.Delete(ctx, deleter)
 ```

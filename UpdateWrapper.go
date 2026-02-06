@@ -23,6 +23,14 @@ func NewUpdateWrapper[T any]() *UpdateWrapper[T] {
 	}
 }
 
+// Table 指定表名 (用于设置别名等)
+func (w *UpdateWrapper[T]) Table(name string) *UpdateWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Table(name)
+	})
+	return w
+}
+
 // addCondition 添加条件 (内部辅助方法)
 func (w *UpdateWrapper[T]) addCondition(query any, args ...any) {
 	isOr := w.or

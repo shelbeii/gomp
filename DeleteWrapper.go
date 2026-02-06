@@ -23,6 +23,14 @@ func NewDeleteWrapper[T any]() *DeleteWrapper[T] {
 	}
 }
 
+// Table 指定表名 (用于设置别名等)
+func (w *DeleteWrapper[T]) Table(name string) *DeleteWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Table(name)
+	})
+	return w
+}
+
 func (w *DeleteWrapper[T]) UseSoftDelete(enabled bool) *DeleteWrapper[T] {
 	w.useSoftDelete = enabled
 	return w
