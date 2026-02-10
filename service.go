@@ -72,6 +72,9 @@ func (s *ServiceImpl[T]) GetById(ctx context.Context, id any) (*T, error) {
 	var entity T
 	err := s.getDB(ctx).First(&entity, id).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &entity, nil
@@ -87,6 +90,9 @@ func (s *ServiceImpl[T]) GetOne(ctx context.Context, wrapper *QueryWrapper[T]) (
 	// 使用 Take 替代 First，避免自动添加 ORDER BY id，提高性能
 	err := db.Take(&entity).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return &entity, nil
