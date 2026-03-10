@@ -297,6 +297,44 @@ func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrappe
 	return w
 }
 
+// AndOr 将多个子条件以 OR 连接后，整体以 AND 加入查询
+// 等价于: AND ( (子条件1) OR (子条件2) OR ... )
+// 适用场景: 循环中收集多个时间段等 OR 分支，但整体需与其他条件 AND 连接
+//
+// 示例:
+//
+//	wrp.AndOr(
+//		func(sw *QueryWrapper[T]) { sw.Ge("col", val1).Le("col", val2) },
+//		func(sw *QueryWrapper[T]) { sw.Ge("col", val3).Le("col", val4) },
+//	)
+//
+// 生成: AND ((col >= ? AND col <= ?) OR (col >= ? AND col <= ?))
+func (w *QueryWrapper[T]) AndOr(conditions ...func(*QueryWrapper[T])) *QueryWrapper[T] {
+	if len(conditions) == 0 {
+		return w
+	}
+	isOr := w.or
+	w.or = false
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		// 构建第一个子条件作为基础
+		firstWrapper := NewQueryWrapper[T]()
+		conditions[0](firstWrapper)
+		subDB := firstWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
+		// 依次将其余子条件以 OR 追加
+		for _, f := range conditions[1:] {
+			subWrapper := NewQueryWrapper[T]()
+			f(subWrapper)
+			nextDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
+			subDB = subDB.Or(nextDB)
+		}
+		if isOr {
+			return db.Or(subDB)
+		}
+		return db.Where(subDB)
+	})
+	return w
+}
+
 // Eq 等于 =
 func (w *QueryWrapper[T]) Eq(column string, val any, condition ...bool) *QueryWrapper[T] {
 	if len(condition) > 0 && !condition[0] {
