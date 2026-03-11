@@ -1,314 +1,90 @@
 package gomp
 
 import (
-	"fmt"
 	"strings"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // QueryWrapper 查询条件构造器
 type QueryWrapper[T any] struct {
-	scopes  []func(*gorm.DB) *gorm.DB
-	selects []string // 存储需要查询的字段
-	or      bool     // 下一个条件是否使用 OR 连接
+	conditionMixin
+	selects []string
 }
 
 // NewQueryWrapper 创建查询条件构造器
 func NewQueryWrapper[T any]() *QueryWrapper[T] {
 	return &QueryWrapper[T]{
-		scopes:  make([]func(*gorm.DB) *gorm.DB, 0),
-		selects: make([]string, 0),
-		or:      false,
+		conditionMixin: newConditionMixin(),
+		selects:        make([]string, 0, 4),
 	}
 }
 
-type JoinOnWrapper struct {
-	conditions []joinCondition
-	or         bool
+// Raw 添加原生 SQL 条件片段
+func (w *QueryWrapper[T]) Raw(query string, args ...any) *QueryWrapper[T] {
+	condRaw(&w.conditionMixin, query, args...)
+	return w
 }
 
-type joinCondition struct {
-	query string
-	args  []any
-	isOr  bool
-}
-
-func NewJoinOnWrapper() *JoinOnWrapper {
-	return &JoinOnWrapper{
-		conditions: make([]joinCondition, 0),
-		or:         false,
-	}
-}
-
-func (w *JoinOnWrapper) addCondition(query string, args ...any) {
-	if strings.TrimSpace(query) == "" {
-		w.or = false
-		return
-	}
-	isOr := w.or
-	w.or = false
-	w.conditions = append(w.conditions, joinCondition{query: query, args: args, isOr: isOr})
-}
-
-func (w *JoinOnWrapper) Or(conditions ...func(*JoinOnWrapper)) *JoinOnWrapper {
-	if len(conditions) > 0 {
-		f := conditions[0]
-		sub := NewJoinOnWrapper()
-		f(sub)
-		clause, args := sub.Build()
-		if strings.TrimSpace(clause) != "" {
-			w.addCondition("("+clause+")", args...)
-		}
+// Or 设置下一个条件为 OR，或将多个子条件以 OR 连接后追加
+// Or()                    -> 下一个条件用 OR 连接
+// Or(f1, f2, ...)         -> (f1) OR (f2) OR ...，整体以当前连接符（AND/OR）追加
+func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper[T] {
+	if len(conditions) == 0 {
+		w.or = true
 		return w
 	}
-	w.or = true
-	return w
-}
-
-func (w *JoinOnWrapper) And(conditions ...func(*JoinOnWrapper)) *JoinOnWrapper {
-	if len(conditions) > 0 {
-		f := conditions[0]
-		sub := NewJoinOnWrapper()
-		f(sub)
-		clause, args := sub.Build()
-		if strings.TrimSpace(clause) != "" {
-			w.addCondition("("+clause+")", args...)
-		}
-		return w
-	}
-	w.or = false
-	return w
-}
-
-func (w *JoinOnWrapper) Raw(query string, args ...any) *JoinOnWrapper {
-	w.addCondition(query, args...)
-	return w
-}
-
-func (w *JoinOnWrapper) Eq(column string, val any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s = ?", column), val)
-	return w
-}
-
-func (w *JoinOnWrapper) EqColumn(leftColumn string, rightColumn string, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s = %s", leftColumn, rightColumn))
-	return w
-}
-
-func (w *JoinOnWrapper) Ne(column string, val any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s <> ?", column), val)
-	return w
-}
-
-func (w *JoinOnWrapper) Gt(column string, val any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s > ?", column), val)
-	return w
-}
-
-func (w *JoinOnWrapper) Ge(column string, val any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s >= ?", column), val)
-	return w
-}
-
-func (w *JoinOnWrapper) Lt(column string, val any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s < ?", column), val)
-	return w
-}
-
-func (w *JoinOnWrapper) Le(column string, val any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s <= ?", column), val)
-	return w
-}
-
-func (w *JoinOnWrapper) Like(column string, val string, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val+"%")
-	return w
-}
-
-func (w *JoinOnWrapper) LikeLeft(column string, val string, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val)
-	return w
-}
-
-func (w *JoinOnWrapper) LikeRight(column string, val string, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), val+"%")
-	return w
-}
-
-func (w *JoinOnWrapper) In(column string, val any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s IN (?)", column), val)
-	return w
-}
-
-func (w *JoinOnWrapper) NotIn(column string, val any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s NOT IN (?)", column), val)
-	return w
-}
-
-func (w *JoinOnWrapper) IsNull(column string, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s IS NULL", column))
-	return w
-}
-
-func (w *JoinOnWrapper) IsNotNull(column string, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s IS NOT NULL", column))
-	return w
-}
-
-func (w *JoinOnWrapper) Between(column string, val1, val2 any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s BETWEEN ? AND ?", column), val1, val2)
-	return w
-}
-
-func (w *JoinOnWrapper) NotBetween(column string, val1, val2 any, condition ...bool) *JoinOnWrapper {
-	if len(condition) > 0 && !condition[0] {
-		return w
-	}
-	w.addCondition(fmt.Sprintf("%s NOT BETWEEN ? AND ?", column), val1, val2)
-	return w
-}
-
-func (w *JoinOnWrapper) Build() (string, []any) {
-	if len(w.conditions) == 0 {
-		return "", nil
-	}
-	var sb strings.Builder
-	args := make([]any, 0)
-	for i, c := range w.conditions {
-		if i > 0 {
-			if c.isOr {
-				sb.WriteString(" OR ")
-			} else {
-				sb.WriteString(" AND ")
-			}
-		}
-		sb.WriteString(c.query)
-		if len(c.args) > 0 {
-			args = append(args, c.args...)
-		}
-	}
-	return sb.String(), args
-}
-
-// addCondition 添加条件 (内部辅助方法)
-func (w *QueryWrapper[T]) addCondition(query any, args ...any) {
 	isOr := w.or
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		if isOr {
-			return db.Or(query, args...)
+		firstSub := NewQueryWrapper[T]()
+		conditions[0](firstSub)
+		subDB := firstSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+		for _, f := range conditions[1:] {
+			nextSub := NewQueryWrapper[T]()
+			f(nextSub)
+			nextDB := nextSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+			subDB = subDB.Or(nextDB)
 		}
-		return db.Where(query, args...)
+		if isOr {
+			return db.Or(subDB)
+		}
+		return db.Or(subDB)
 	})
+	return w
 }
 
-// Or 设置下一个条件为 OR 连接，或者添加嵌套 OR 条件
-// Or() -> 下一个条件使用 OR
-// Or(func(w *QueryWrapper[T])) -> OR ( ... )
-func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper[T] {
-	if len(conditions) > 0 {
-		f := conditions[0]
-		isOr := w.or // 捕获当前连接符
+// And 将多个子条件以 AND 连接后追加（整体以当前连接符追加）
+// And()                    -> 重置为 AND 连接（清除上一个 Or() 标记）
+// And(f1, f2, ...)         -> (f1) AND (f2) AND ...，整体以当前连接符追加
+func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrapper[T] {
+	if len(conditions) == 0 {
 		w.or = false
-		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-			subWrapper := NewQueryWrapper[T]()
-			f(subWrapper)
-
-			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
-
-			if isOr {
-				return db.Or(subDB)
-			}
-			return db.Or(subDB)
-		})
 		return w
 	}
-	w.or = true
-	return w
-}
-
-// And 添加嵌套 AND 条件
-// And(func(w *QueryWrapper[T])) -> AND ( ... )
-func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrapper[T] {
-	if len(conditions) > 0 {
-		f := conditions[0]
-		isOr := w.or
-		w.or = false
-		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-			subWrapper := NewQueryWrapper[T]()
-			f(subWrapper)
-
-			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
-
-			if isOr {
-				return db.Or(subDB)
-			}
-			return db.Where(subDB)
-		})
-	}
-	// 如果没有参数，重置为 AND (默认就是 AND，所以其实不做操作，或者强制 w.or = false)
+	isOr := w.or
 	w.or = false
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		firstSub := NewQueryWrapper[T]()
+		conditions[0](firstSub)
+		subDB := firstSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+		for _, f := range conditions[1:] {
+			nextSub := NewQueryWrapper[T]()
+			f(nextSub)
+			nextDB := nextSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+			subDB = subDB.Where(nextDB)
+		}
+		if isOr {
+			return db.Or(subDB)
+		}
+		return db.Where(subDB)
+	})
 	return w
 }
 
-// AndOr 将多个子条件以 OR 连接后，整体以 AND 加入查询
+// AndOr 将多个子条件以 OR 连接，整体以 AND 加入查询
 // 等价于: AND ( (子条件1) OR (子条件2) OR ... )
-// 适用场景: 循环中收集多个时间段等 OR 分支，但整体需与其他条件 AND 连接
-//
-// 示例:
-//
-//	wrp.AndOr(
-//		func(sw *QueryWrapper[T]) { sw.Ge("col", val1).Le("col", val2) },
-//		func(sw *QueryWrapper[T]) { sw.Ge("col", val3).Le("col", val4) },
-//	)
-//
-// 生成: AND ((col >= ? AND col <= ?) OR (col >= ? AND col <= ?))
 func (w *QueryWrapper[T]) AndOr(conditions ...func(*QueryWrapper[T])) *QueryWrapper[T] {
 	if len(conditions) == 0 {
 		return w
@@ -316,15 +92,13 @@ func (w *QueryWrapper[T]) AndOr(conditions ...func(*QueryWrapper[T])) *QueryWrap
 	isOr := w.or
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		// 构建第一个子条件作为基础
-		firstWrapper := NewQueryWrapper[T]()
-		conditions[0](firstWrapper)
-		subDB := firstWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
-		// 依次将其余子条件以 OR 追加
+		firstSub := NewQueryWrapper[T]()
+		conditions[0](firstSub)
+		subDB := firstSub.Apply(db.Session(&gorm.Session{NewDB: true}))
 		for _, f := range conditions[1:] {
-			subWrapper := NewQueryWrapper[T]()
-			f(subWrapper)
-			nextDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
+			nextSub := NewQueryWrapper[T]()
+			f(nextSub)
+			nextDB := nextSub.Apply(db.Session(&gorm.Session{NewDB: true}))
 			subDB = subDB.Or(nextDB)
 		}
 		if isOr {
@@ -340,7 +114,16 @@ func (w *QueryWrapper[T]) Eq(column string, val any, condition ...bool) *QueryWr
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s = ?", column), val)
+	condEq(&w.conditionMixin, column, val)
+	return w
+}
+
+// EqColumn 列与列比较 left = right
+func (w *QueryWrapper[T]) EqColumn(leftColumn, rightColumn string, condition ...bool) *QueryWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condEqColumn(&w.conditionMixin, leftColumn, rightColumn)
 	return w
 }
 
@@ -349,7 +132,7 @@ func (w *QueryWrapper[T]) Ne(column string, val any, condition ...bool) *QueryWr
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s <> ?", column), val)
+	condNe(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -358,7 +141,7 @@ func (w *QueryWrapper[T]) Gt(column string, val any, condition ...bool) *QueryWr
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s > ?", column), val)
+	condGt(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -367,7 +150,7 @@ func (w *QueryWrapper[T]) Ge(column string, val any, condition ...bool) *QueryWr
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s >= ?", column), val)
+	condGe(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -376,7 +159,7 @@ func (w *QueryWrapper[T]) Lt(column string, val any, condition ...bool) *QueryWr
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s < ?", column), val)
+	condLt(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -385,7 +168,7 @@ func (w *QueryWrapper[T]) Le(column string, val any, condition ...bool) *QueryWr
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s <= ?", column), val)
+	condLe(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -394,7 +177,7 @@ func (w *QueryWrapper[T]) Like(column string, val string, condition ...bool) *Qu
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val+"%")
+	condLike(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -403,7 +186,7 @@ func (w *QueryWrapper[T]) LikeLeft(column string, val string, condition ...bool)
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val)
+	condLikeLeft(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -412,7 +195,7 @@ func (w *QueryWrapper[T]) LikeRight(column string, val string, condition ...bool
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), val+"%")
+	condLikeRight(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -421,7 +204,7 @@ func (w *QueryWrapper[T]) In(column string, val any, condition ...bool) *QueryWr
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s IN (?)", column), val)
+	condIn(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -430,7 +213,7 @@ func (w *QueryWrapper[T]) NotIn(column string, val any, condition ...bool) *Quer
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s NOT IN (?)", column), val)
+	condNotIn(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -439,7 +222,7 @@ func (w *QueryWrapper[T]) IsNull(column string, condition ...bool) *QueryWrapper
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s IS NULL", column))
+	condIsNull(&w.conditionMixin, column)
 	return w
 }
 
@@ -448,7 +231,7 @@ func (w *QueryWrapper[T]) IsNotNull(column string, condition ...bool) *QueryWrap
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s IS NOT NULL", column))
+	condIsNotNull(&w.conditionMixin, column)
 	return w
 }
 
@@ -457,7 +240,7 @@ func (w *QueryWrapper[T]) Between(column string, val1, val2 any, condition ...bo
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s BETWEEN ? AND ?", column), val1, val2)
+	condBetween(&w.conditionMixin, column, val1, val2)
 	return w
 }
 
@@ -466,7 +249,7 @@ func (w *QueryWrapper[T]) NotBetween(column string, val1, val2 any, condition ..
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s NOT BETWEEN ? AND ?", column), val1, val2)
+	condNotBetween(&w.conditionMixin, column, val1, val2)
 	return w
 }
 
@@ -475,6 +258,12 @@ func (w *QueryWrapper[T]) Table(name string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Table(name)
 	})
+	return w
+}
+
+// Select 指定查询字段
+func (w *QueryWrapper[T]) Select(columns ...string) *QueryWrapper[T] {
+	w.selects = append(w.selects, columns...)
 	return w
 }
 
@@ -494,18 +283,19 @@ func (w *QueryWrapper[T]) OrderByAsc(column string) *QueryWrapper[T] {
 	return w
 }
 
-// GroupBy 分组 GROUP BY
+// GroupBy 分组 GROUP BY，多列一次性传入
 func (w *QueryWrapper[T]) GroupBy(columns ...string) *QueryWrapper[T] {
+	if len(columns) == 0 {
+		return w
+	}
+	combined := strings.Join(columns, ", ")
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		for _, column := range columns {
-			db = db.Group(column)
-		}
-		return db
+		return db.Group(combined)
 	})
 	return w
 }
 
-// Having 分组后筛选 HAVING
+// Having 分组后筛选
 func (w *QueryWrapper[T]) Having(query string, args ...any) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Having(query, args...)
@@ -513,7 +303,7 @@ func (w *QueryWrapper[T]) Having(query string, args ...any) *QueryWrapper[T] {
 	return w
 }
 
-// Distinct 去重 DISTINCT
+// Distinct 去重
 func (w *QueryWrapper[T]) Distinct(args ...any) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Distinct(args...)
@@ -521,16 +311,42 @@ func (w *QueryWrapper[T]) Distinct(args ...any) *QueryWrapper[T] {
 	return w
 }
 
-// Select 指定查询字段
-func (w *QueryWrapper[T]) Select(columns ...string) *QueryWrapper[T] {
-	w.selects = append(w.selects, columns...)
+// Limit 限制返回条数
+func (w *QueryWrapper[T]) Limit(limit int) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Limit(limit)
+	})
+	return w
+}
+
+// Offset 设置偏移量
+func (w *QueryWrapper[T]) Offset(offset int) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Offset(offset)
+	})
+	return w
+}
+
+// ForUpdate 添加悲观锁 SELECT ... FOR UPDATE
+func (w *QueryWrapper[T]) ForUpdate() *QueryWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Clauses(clause.Locking{Strength: "UPDATE"})
+	})
+	return w
+}
+
+// ForShare 添加共享锁 SELECT ... FOR SHARE
+func (w *QueryWrapper[T]) ForShare() *QueryWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Clauses(clause.Locking{Strength: "SHARE"})
+	})
 	return w
 }
 
 // LeftJoin 左连接
 func (w *QueryWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+		return db.Joins("LEFT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
 	return w
 }
@@ -538,7 +354,7 @@ func (w *QueryWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn 
 // RightJoin 右连接
 func (w *QueryWrapper[T]) RightJoin(table string, leftColumn string, rightColumn string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+		return db.Joins("RIGHT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
 	return w
 }
@@ -546,72 +362,33 @@ func (w *QueryWrapper[T]) RightJoin(table string, leftColumn string, rightColumn
 // InnerJoin 内连接
 func (w *QueryWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+		return db.Joins("INNER JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
 	return w
 }
 
+// LeftJoinOn 左连接（自定义 ON 条件）
 func (w *QueryWrapper[T]) LeftJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *QueryWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		onWrapper := NewJoinOnWrapper()
-		onWrapper.EqColumn(leftColumn, rightColumn)
-		for _, b := range builders {
-			if b != nil {
-				b(onWrapper)
-			}
-		}
-		onClause, args := onWrapper.Build()
-		if strings.TrimSpace(onClause) == "" {
-			return db
-		}
-		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s", table, onClause), args...)
-	})
+	w.scopes = append(w.scopes, buildJoinScope("LEFT JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
+// RightJoinOn 右连接（自定义 ON 条件）
 func (w *QueryWrapper[T]) RightJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *QueryWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		onWrapper := NewJoinOnWrapper()
-		onWrapper.EqColumn(leftColumn, rightColumn)
-		for _, b := range builders {
-			if b != nil {
-				b(onWrapper)
-			}
-		}
-		onClause, args := onWrapper.Build()
-		if strings.TrimSpace(onClause) == "" {
-			return db
-		}
-		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s", table, onClause), args...)
-	})
+	w.scopes = append(w.scopes, buildJoinScope("RIGHT JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
+// InnerJoinOn 内连接（自定义 ON 条件）
 func (w *QueryWrapper[T]) InnerJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *QueryWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		onWrapper := NewJoinOnWrapper()
-		onWrapper.EqColumn(leftColumn, rightColumn)
-		for _, b := range builders {
-			if b != nil {
-				b(onWrapper)
-			}
-		}
-		onClause, args := onWrapper.Build()
-		if strings.TrimSpace(onClause) == "" {
-			return db
-		}
-		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s", table, onClause), args...)
-	})
+	w.scopes = append(w.scopes, buildJoinScope("INNER JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
-// Apply 应用条件到 GORM DB
+// Apply 应用所有条件到 GORM DB
 func (w *QueryWrapper[T]) Apply(db *gorm.DB) *gorm.DB {
 	if len(w.selects) > 0 {
 		db = db.Select(w.selects)
 	}
-	for _, scope := range w.scopes {
-		db = scope(db)
-	}
-	return db
+	return w.applyScopes(db)
 }

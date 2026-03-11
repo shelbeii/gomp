@@ -1,97 +1,91 @@
 package gomp
 
 import (
-	"fmt"
-	"strings"
-
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // DeleteWrapper 删除条件构造器
 type DeleteWrapper[T any] struct {
-	scopes        []func(*gorm.DB) *gorm.DB
-	or            bool // 下一个条件是否使用 OR 连接
+	conditionMixin
 	useSoftDelete bool
 	tableName     string
-	joinClauses   []string
 }
 
 // NewDeleteWrapper 创建删除条件构造器
 func NewDeleteWrapper[T any]() *DeleteWrapper[T] {
 	return &DeleteWrapper[T]{
-		scopes:        make([]func(*gorm.DB) *gorm.DB, 0),
-		or:            false,
-		useSoftDelete: true,
-		joinClauses:   make([]string, 0),
+		conditionMixin: newConditionMixin(),
+		useSoftDelete:  true,
 	}
 }
 
-// Table 指定表名 (用于设置别名等)
+// Table 指定表名
 func (w *DeleteWrapper[T]) Table(name string) *DeleteWrapper[T] {
 	w.tableName = name
 	return w
 }
 
+// UseSoftDelete 设置是否使用软删除（默认 true）
 func (w *DeleteWrapper[T]) UseSoftDelete(enabled bool) *DeleteWrapper[T] {
 	w.useSoftDelete = enabled
 	return w
 }
 
-// addCondition 添加条件 (内部辅助方法)
-func (w *DeleteWrapper[T]) addCondition(query any, args ...any) {
-	isOr := w.or
-	w.or = false
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		if isOr {
-			return db.Or(query, args...)
-		}
-		return db.Where(query, args...)
-	})
-}
-
-// Or 设置下一个条件为 OR 连接，或者添加嵌套 OR 条件
-func (w *DeleteWrapper[T]) Or(conditions ...func(*DeleteWrapper[T])) *DeleteWrapper[T] {
-	if len(conditions) > 0 {
-		f := conditions[0]
-		isOr := w.or
-		w.or = false
-		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-			subWrapper := NewDeleteWrapper[T]()
-			f(subWrapper)
-
-			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
-
-			if isOr {
-				return db.Or(subDB)
-			}
-			return db.Or(subDB)
-		})
-		return w
-	}
-	w.or = true
+// Raw 添加原生 SQL 条件片段
+func (w *DeleteWrapper[T]) Raw(query string, args ...any) *DeleteWrapper[T] {
+	condRaw(&w.conditionMixin, query, args...)
 	return w
 }
 
-// And 添加嵌套 AND 条件
-func (w *DeleteWrapper[T]) And(conditions ...func(*DeleteWrapper[T])) *DeleteWrapper[T] {
-	if len(conditions) > 0 {
-		f := conditions[0]
-		isOr := w.or
-		w.or = false
-		w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-			subWrapper := NewDeleteWrapper[T]()
-			f(subWrapper)
-
-			subDB := subWrapper.Apply(db.Session(&gorm.Session{NewDB: true}))
-
-			if isOr {
-				return db.Or(subDB)
-			}
-			return db.Where(subDB)
-		})
+// Or 设置下一个条件为 OR，或将多个子条件以 OR 连接后追加
+func (w *DeleteWrapper[T]) Or(conditions ...func(*DeleteWrapper[T])) *DeleteWrapper[T] {
+	if len(conditions) == 0 {
+		w.or = true
+		return w
 	}
+	isOr := w.or
 	w.or = false
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		firstSub := NewDeleteWrapper[T]()
+		conditions[0](firstSub)
+		subDB := firstSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
+		for _, f := range conditions[1:] {
+			nextSub := NewDeleteWrapper[T]()
+			f(nextSub)
+			nextDB := nextSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
+			subDB = subDB.Or(nextDB)
+		}
+		if isOr {
+			return db.Or(subDB)
+		}
+		return db.Or(subDB)
+	})
+	return w
+}
+
+// And 将多个子条件以 AND 连接后追加
+func (w *DeleteWrapper[T]) And(conditions ...func(*DeleteWrapper[T])) *DeleteWrapper[T] {
+	if len(conditions) == 0 {
+		w.or = false
+		return w
+	}
+	isOr := w.or
+	w.or = false
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		firstSub := NewDeleteWrapper[T]()
+		conditions[0](firstSub)
+		subDB := firstSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
+		for _, f := range conditions[1:] {
+			nextSub := NewDeleteWrapper[T]()
+			f(nextSub)
+			nextDB := nextSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
+			subDB = subDB.Where(nextDB)
+		}
+		if isOr {
+			return db.Or(subDB)
+		}
+		return db.Where(subDB)
+	})
 	return w
 }
 
@@ -100,7 +94,16 @@ func (w *DeleteWrapper[T]) Eq(column string, val any, condition ...bool) *Delete
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s = ?", column), val)
+	condEq(&w.conditionMixin, column, val)
+	return w
+}
+
+// EqColumn 列与列比较 left = right
+func (w *DeleteWrapper[T]) EqColumn(leftColumn, rightColumn string, condition ...bool) *DeleteWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condEqColumn(&w.conditionMixin, leftColumn, rightColumn)
 	return w
 }
 
@@ -109,7 +112,7 @@ func (w *DeleteWrapper[T]) Ne(column string, val any, condition ...bool) *Delete
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s <> ?", column), val)
+	condNe(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -118,7 +121,7 @@ func (w *DeleteWrapper[T]) Gt(column string, val any, condition ...bool) *Delete
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s > ?", column), val)
+	condGt(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -127,7 +130,7 @@ func (w *DeleteWrapper[T]) Ge(column string, val any, condition ...bool) *Delete
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s >= ?", column), val)
+	condGe(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -136,7 +139,7 @@ func (w *DeleteWrapper[T]) Lt(column string, val any, condition ...bool) *Delete
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s < ?", column), val)
+	condLt(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -145,7 +148,7 @@ func (w *DeleteWrapper[T]) Le(column string, val any, condition ...bool) *Delete
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s <= ?", column), val)
+	condLe(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -154,7 +157,7 @@ func (w *DeleteWrapper[T]) Like(column string, val string, condition ...bool) *D
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val+"%")
+	condLike(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -163,7 +166,7 @@ func (w *DeleteWrapper[T]) LikeLeft(column string, val string, condition ...bool
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), "%"+val)
+	condLikeLeft(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -172,7 +175,7 @@ func (w *DeleteWrapper[T]) LikeRight(column string, val string, condition ...boo
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s LIKE ?", column), val+"%")
+	condLikeRight(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -181,7 +184,7 @@ func (w *DeleteWrapper[T]) In(column string, val any, condition ...bool) *Delete
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s IN (?)", column), val)
+	condIn(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -190,7 +193,7 @@ func (w *DeleteWrapper[T]) NotIn(column string, val any, condition ...bool) *Del
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s NOT IN (?)", column), val)
+	condNotIn(&w.conditionMixin, column, val)
 	return w
 }
 
@@ -199,7 +202,7 @@ func (w *DeleteWrapper[T]) IsNull(column string, condition ...bool) *DeleteWrapp
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s IS NULL", column))
+	condIsNull(&w.conditionMixin, column)
 	return w
 }
 
@@ -208,7 +211,7 @@ func (w *DeleteWrapper[T]) IsNotNull(column string, condition ...bool) *DeleteWr
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s IS NOT NULL", column))
+	condIsNotNull(&w.conditionMixin, column)
 	return w
 }
 
@@ -217,7 +220,7 @@ func (w *DeleteWrapper[T]) Between(column string, val1, val2 any, condition ...b
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s BETWEEN ? AND ?", column), val1, val2)
+	condBetween(&w.conditionMixin, column, val1, val2)
 	return w
 }
 
@@ -226,130 +229,62 @@ func (w *DeleteWrapper[T]) NotBetween(column string, val1, val2 any, condition .
 	if len(condition) > 0 && !condition[0] {
 		return w
 	}
-	w.addCondition(fmt.Sprintf("%s NOT BETWEEN ? AND ?", column), val1, val2)
+	condNotBetween(&w.conditionMixin, column, val1, val2)
 	return w
 }
 
 // LeftJoin 左连接
 func (w *DeleteWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
-	w.joinClauses = append(w.joinClauses, fmt.Sprintf("LEFT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Joins("LEFT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
+	})
 	return w
 }
 
 // RightJoin 右连接
 func (w *DeleteWrapper[T]) RightJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
-	w.joinClauses = append(w.joinClauses, fmt.Sprintf("RIGHT JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Joins("RIGHT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
+	})
 	return w
 }
 
 // InnerJoin 内连接
 func (w *DeleteWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
-	w.joinClauses = append(w.joinClauses, fmt.Sprintf("INNER JOIN %s ON %s = %s", table, leftColumn, rightColumn))
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Joins("INNER JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
+	})
 	return w
 }
 
-// LeftJoinOn 左连接(自定义条件)
+// LeftJoinOn 左连接（自定义 ON 条件）
 func (w *DeleteWrapper[T]) LeftJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		onWrapper := NewJoinOnWrapper()
-		onWrapper.EqColumn(leftColumn, rightColumn)
-		for _, b := range builders {
-			if b != nil {
-				b(onWrapper)
-			}
-		}
-		onClause, args := onWrapper.Build()
-		if strings.TrimSpace(onClause) == "" {
-			return db
-		}
-		return db.Joins(fmt.Sprintf("LEFT JOIN %s ON %s", table, onClause), args...)
-	})
+	w.scopes = append(w.scopes, buildJoinScope("LEFT JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
-// RightJoinOn 右连接(自定义条件)
+// RightJoinOn 右连接（自定义 ON 条件）
 func (w *DeleteWrapper[T]) RightJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		onWrapper := NewJoinOnWrapper()
-		onWrapper.EqColumn(leftColumn, rightColumn)
-		for _, b := range builders {
-			if b != nil {
-				b(onWrapper)
-			}
-		}
-		onClause, args := onWrapper.Build()
-		if strings.TrimSpace(onClause) == "" {
-			return db
-		}
-		return db.Joins(fmt.Sprintf("RIGHT JOIN %s ON %s", table, onClause), args...)
-	})
+	w.scopes = append(w.scopes, buildJoinScope("RIGHT JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
-// InnerJoinOn 内连接(自定义条件)
+// InnerJoinOn 内连接（自定义 ON 条件）
 func (w *DeleteWrapper[T]) InnerJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
-	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		onWrapper := NewJoinOnWrapper()
-		onWrapper.EqColumn(leftColumn, rightColumn)
-		for _, b := range builders {
-			if b != nil {
-				b(onWrapper)
-			}
-		}
-		onClause, args := onWrapper.Build()
-		if strings.TrimSpace(onClause) == "" {
-			return db
-		}
-		return db.Joins(fmt.Sprintf("INNER JOIN %s ON %s", table, onClause), args...)
-	})
+	w.scopes = append(w.scopes, buildJoinScope("INNER JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
 // Apply 应用条件到 GORM DB
+// Table 先于 scopes 设置，确保 GORM 能正确关联表名与 JOIN
 func (w *DeleteWrapper[T]) Apply(db *gorm.DB) *gorm.DB {
-	for _, scope := range w.scopes {
-		db = scope(db)
-	}
-
-	// 处理连接查询 (GORM Delete 默认忽略 Joins，需手动合并到 Table)
-	if len(w.joinClauses) > 0 {
-		fullTable := w.tableName
-		if fullTable == "" {
-			// 如果没有显式设置表名，尝试从 model 获取 (注意：这里假设 db 已经绑定了 model，或者由 Service 设置)
-			// 但 Apply 时 db 可能还没有 model 信息，或者 model 是 T
-			// 简单起见，如果使用了 Join，建议必须使用 Table()
-			// 这里我们只能处理设置了 Table 的情况，否则只能依赖 GORM (可能失效)
-		}
-
-		if fullTable != "" {
-			sb := strings.Builder{}
-			sb.WriteString(fullTable)
-			for _, join := range w.joinClauses {
-				sb.WriteString(" ")
-				sb.WriteString(join)
-			}
-			db = db.Table(sb.String())
-
-			// 针对 MySQL 的 DELETE alias FROM ... 语法修复
-			// 如果是 MySQL 且表名包含别名 (有空格)，则尝试添加 Delete Clause
-			if db.Dialector.Name() == "mysql" {
-				parts := strings.Fields(fullTable)
-				if len(parts) >= 2 {
-					// 假设最后一个部分是别名
-					alias := parts[len(parts)-1]
-					// 简单的别名检查，避免关键字等误判 (用户应保证别名合法)
-					db = db.Clauses(clause.Delete{Modifier: alias})
-				}
-			}
-		} else {
-			// 如果没设置表名，尝试回退到 standard Joins (虽然 Delete 可能忽略)
-			for _, join := range w.joinClauses {
-				db = db.Joins(join)
-			}
-		}
-	} else if w.tableName != "" {
+	if w.tableName != "" {
 		db = db.Table(w.tableName)
 	}
+	return w.applyScopes(db)
+}
 
-	return db
+// hasWhereConditions 检查是否有 WHERE 条件
+func (w *DeleteWrapper[T]) hasWhereConditions() bool {
+	return w.hasConditions()
 }

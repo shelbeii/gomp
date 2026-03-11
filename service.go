@@ -7,10 +7,10 @@ import (
 	"gorm.io/gorm"
 )
 
-// IService 定义类似 MyBatis-Plus 的通用 Service 接口
+// IService 定义通用 Service 接口
 type IService[T any] interface {
 	Save(ctx context.Context, entity *T) error
-	SaveBatch(ctx context.Context, entities []*T) error
+	SaveBatch(ctx context.Context, entities []*T, batchSize ...int) error
 	RemoveById(ctx context.Context, id any) error
 	RemoveByIds(ctx context.Context, ids any) error
 	UpdateById(ctx context.Context, entity *T) error
@@ -31,43 +31,59 @@ type ServiceImpl[T any] struct {
 	DB *gorm.DB
 }
 
+// NewServiceImpl 创建 ServiceImpl
 func NewServiceImpl[T any](db *gorm.DB) *ServiceImpl[T] {
 	return &ServiceImpl[T]{DB: db}
 }
 
+// GetDB 获取原始 DB
 func (s *ServiceImpl[T]) GetDB() *gorm.DB {
 	return s.DB
 }
 
+// getDB 按配置返回带 ctx 的 DB
 func (s *ServiceImpl[T]) getDB(ctx context.Context) *gorm.DB {
-	if config.Gomp.EnableSQLPrint {
+	if getConfig().Gomp.EnableSQLPrint {
 		return s.DB.WithContext(ctx).Debug()
 	}
 	return s.DB.WithContext(ctx)
 }
 
+// Save 保存单条记录
 func (s *ServiceImpl[T]) Save(ctx context.Context, entity *T) error {
 	return s.getDB(ctx).Create(entity).Error
 }
 
-func (s *ServiceImpl[T]) SaveBatch(ctx context.Context, entities []*T) error {
-	return s.getDB(ctx).CreateInBatches(entities, 100).Error
+// SaveBatch 批量保存，空切片直接返回
+func (s *ServiceImpl[T]) SaveBatch(ctx context.Context, entities []*T, batchSize ...int) error {
+	if len(entities) == 0 {
+		return nil
+	}
+	size := getConfig().Gomp.SaveBatchSize
+	if len(batchSize) > 0 && batchSize[0] > 0 {
+		size = batchSize[0]
+	}
+	return s.getDB(ctx).CreateInBatches(entities, size).Error
 }
 
+// RemoveById 根据主键删除
 func (s *ServiceImpl[T]) RemoveById(ctx context.Context, id any) error {
 	var entity T
 	return s.getDB(ctx).Delete(&entity, id).Error
 }
 
+// RemoveByIds 根据主键批量删除
 func (s *ServiceImpl[T]) RemoveByIds(ctx context.Context, ids any) error {
 	var entity T
 	return s.getDB(ctx).Delete(&entity, ids).Error
 }
 
+// UpdateById 根据主键更新（只更新非零字段）
 func (s *ServiceImpl[T]) UpdateById(ctx context.Context, entity *T) error {
 	return s.getDB(ctx).Updates(entity).Error
 }
 
+// GetById 根据主键查询，不存在返回 (nil, nil)
 func (s *ServiceImpl[T]) GetById(ctx context.Context, id any) (*T, error) {
 	var entity T
 	err := s.getDB(ctx).First(&entity, id).Error
@@ -80,14 +96,13 @@ func (s *ServiceImpl[T]) GetById(ctx context.Context, id any) (*T, error) {
 	return &entity, nil
 }
 
+// GetOne 根据条件查询单条，不存在返回 (nil, nil)
 func (s *ServiceImpl[T]) GetOne(ctx context.Context, wrapper *QueryWrapper[T]) (*T, error) {
 	var entity T
 	db := s.getDB(ctx)
 	if wrapper != nil {
 		db = wrapper.Apply(db)
 	}
-	//err := db.First(&entity).Error
-	// 使用 Take 替代 First，避免自动添加 ORDER BY id，提高性能
 	err := db.Take(&entity).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -98,8 +113,9 @@ func (s *ServiceImpl[T]) GetOne(ctx context.Context, wrapper *QueryWrapper[T]) (
 	return &entity, nil
 }
 
+// List 根据条件查询列表，空结果返回空切片（非 nil）
 func (s *ServiceImpl[T]) List(ctx context.Context, wrapper *QueryWrapper[T]) ([]*T, error) {
-	var entities []*T
+	entities := make([]*T, 0)
 	db := s.getDB(ctx)
 	if wrapper != nil {
 		db = wrapper.Apply(db)
@@ -108,29 +124,24 @@ func (s *ServiceImpl[T]) List(ctx context.Context, wrapper *QueryWrapper[T]) ([]
 	return entities, err
 }
 
+// Page 分页查询
 func (s *ServiceImpl[T]) Page(ctx context.Context, page *Page[T], wrapper *QueryWrapper[T]) (*Page[T], error) {
-	var entities []*T
+	entities := make([]*T, 0)
 	db := s.getDB(ctx).Model(new(T))
 	if wrapper != nil {
 		db = wrapper.Apply(db)
 	}
-
 	var total int64
-	// 使用 Session 拷贝进行 Count，避免污染后续查询状态
-	if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+	if err := db.Session(&gorm.Session{NewDB: true}).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	page.Total = total
-
-	// 如果没有数据，直接返回
 	if total == 0 {
 		return page, nil
 	}
-
 	if page.Size > 0 {
 		db = db.Offset(page.Offset()).Limit(page.Limit())
 	}
-
 	if err := db.Find(&entities).Error; err != nil {
 		return nil, err
 	}
@@ -138,11 +149,12 @@ func (s *ServiceImpl[T]) Page(ctx context.Context, page *Page[T], wrapper *Query
 	return page, nil
 }
 
+// SelectPage 快捷分页查询
 func (s *ServiceImpl[T]) SelectPage(ctx context.Context, current, size int64, wrapper *QueryWrapper[T]) (*Page[T], error) {
-	page := NewPage[T](current, size)
-	return s.Page(ctx, page, wrapper)
+	return s.Page(ctx, NewPage[T](current, size), wrapper)
 }
 
+// Count 统计记录数
 func (s *ServiceImpl[T]) Count(ctx context.Context, wrapper *QueryWrapper[T]) (int64, error) {
 	var total int64
 	db := s.getDB(ctx).Model(new(T))
@@ -153,24 +165,37 @@ func (s *ServiceImpl[T]) Count(ctx context.Context, wrapper *QueryWrapper[T]) (i
 	return total, err
 }
 
+// Insert 根据 InsertWrapper 插入，支持 OnConflict
 func (s *ServiceImpl[T]) Insert(ctx context.Context, wrapper *InsertWrapper[T]) error {
 	if wrapper == nil {
 		return errors.New("insert wrapper cannot be nil")
 	}
-	return s.getDB(ctx).Model(new(T)).Create(wrapper.values).Error
+	if wrapper.IsEmpty() {
+		return errors.New("insert wrapper has no fields set")
+	}
+	db := s.getDB(ctx).Model(new(T))
+	if wrapper.conflictAction != 0 {
+		oc, err := wrapper.buildClause()
+		if err != nil {
+			return err
+		}
+		db = db.Clauses(oc)
+	}
+	return db.Create(wrapper.values).Error
 }
 
+// Delete 根据 DeleteWrapper 删除
 func (s *ServiceImpl[T]) Delete(ctx context.Context, wrapper *DeleteWrapper[T]) error {
+	if !getConfig().Gomp.AllowGlobalDelete {
+		if wrapper == nil || !wrapper.hasWhereConditions() {
+			return errors.New("global delete is not allowed without WHERE clause; set AllowGlobalDelete=true to override")
+		}
+	}
 	db := s.getDB(ctx)
 	useSoftDelete := true
 	if wrapper != nil {
 		useSoftDelete = wrapper.useSoftDelete
 		db = wrapper.Apply(db)
-	}
-	if !config.Gomp.AllowGlobalDelete {
-		if db.Statement == nil || db.Statement.Clauses == nil || db.Statement.Clauses["WHERE"].Expression == nil {
-			return errors.New("global delete is not allowed without WHERE clause; set gomp.allowGlobalDelete=true to override")
-		}
 	}
 	if !useSoftDelete {
 		db = db.Unscoped()
@@ -178,18 +203,28 @@ func (s *ServiceImpl[T]) Delete(ctx context.Context, wrapper *DeleteWrapper[T]) 
 	return db.Delete(new(T)).Error
 }
 
+// Update 根据 UpdateWrapper 更新
 func (s *ServiceImpl[T]) Update(ctx context.Context, wrapper *UpdateWrapper[T]) error {
 	if wrapper == nil {
 		return errors.New("update wrapper cannot be nil")
 	}
-	db := s.getDB(ctx)
-	db = wrapper.Apply(db)
-	if !config.Gomp.AllowGlobalUpdate {
-		if db.Statement == nil || db.Statement.Clauses == nil || db.Statement.Clauses["WHERE"].Expression == nil {
-			return errors.New("global update is not allowed without WHERE clause; set gomp.allowGlobalUpdate=true to override")
-		}
+	if !getConfig().Gomp.AllowGlobalUpdate && !wrapper.hasWhereConditions() {
+		return errors.New("global update is not allowed without WHERE clause; set AllowGlobalUpdate=true to override")
 	}
+	db := wrapper.Apply(s.getDB(ctx))
 	return db.Model(new(T)).Updates(wrapper.values).Error
+}
+
+// ─────────────────────────────────────────────────────
+// 包级快捷函数：直接内联操作 db，避免 NewServiceImpl 堆分配
+// ─────────────────────────────────────────────────────
+
+// withCtx 内部辅助：按配置附加 ctx 和 Debug
+func withCtx(db *gorm.DB, ctx context.Context) *gorm.DB {
+	if getConfig().Gomp.EnableSQLPrint {
+		return db.WithContext(ctx).Debug()
+	}
+	return db.WithContext(ctx)
 }
 
 // SelectPage 快捷分页查询
@@ -199,57 +234,86 @@ func SelectPage[T any](ctx context.Context, db *gorm.DB, current, size int64, wr
 
 // SelectList 快捷列表查询
 func SelectList[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) ([]*T, error) {
-	return NewServiceImpl[T](db).List(ctx, wrapper)
+	entities := make([]*T, 0)
+	d := withCtx(db, ctx)
+	if wrapper != nil {
+		d = wrapper.Apply(d)
+	}
+	return entities, d.Find(&entities).Error
 }
 
 // SelectOne 快捷单条查询
 func SelectOne[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) (*T, error) {
-	return NewServiceImpl[T](db).GetOne(ctx, wrapper)
+	var entity T
+	d := withCtx(db, ctx)
+	if wrapper != nil {
+		d = wrapper.Apply(d)
+	}
+	err := d.Take(&entity).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &entity, nil
 }
 
 // Save 快捷保存
 func Save[T any](ctx context.Context, db *gorm.DB, entity *T) error {
-	return NewServiceImpl[T](db).Save(ctx, entity)
+	return withCtx(db, ctx).Create(entity).Error
 }
 
 // SaveBatch 快捷批量保存
-func SaveBatch[T any](ctx context.Context, db *gorm.DB, entities []*T) error {
-	return NewServiceImpl[T](db).SaveBatch(ctx, entities)
+func SaveBatch[T any](ctx context.Context, db *gorm.DB, entities []*T, batchSize ...int) error {
+	if len(entities) == 0 {
+		return nil
+	}
+	size := getConfig().Gomp.SaveBatchSize
+	if len(batchSize) > 0 && batchSize[0] > 0 {
+		size = batchSize[0]
+	}
+	return withCtx(db, ctx).CreateInBatches(entities, size).Error
 }
 
-// RemoveById 快捷根据ID删除
+// RemoveById 快捷根据 ID 删除
 func RemoveById[T any](ctx context.Context, db *gorm.DB, id any) error {
-	return NewServiceImpl[T](db).RemoveById(ctx, id)
+	var entity T
+	return withCtx(db, ctx).Delete(&entity, id).Error
 }
 
-// RemoveByIds 快捷根据ID批量删除
+// RemoveByIds 快捷根据 ID 批量删除
 func RemoveByIds[T any](ctx context.Context, db *gorm.DB, ids any) error {
-	return NewServiceImpl[T](db).RemoveByIds(ctx, ids)
+	var entity T
+	return withCtx(db, ctx).Delete(&entity, ids).Error
 }
 
-// UpdateById 快捷根据ID更新
+// UpdateById 快捷根据 ID 更新
 func UpdateById[T any](ctx context.Context, db *gorm.DB, entity *T) error {
-	return NewServiceImpl[T](db).UpdateById(ctx, entity)
+	return withCtx(db, ctx).Updates(entity).Error
 }
 
-// GetById 快捷根据ID查询
+// GetById 快捷根据 ID 查询
 func GetById[T any](ctx context.Context, db *gorm.DB, id any) (*T, error) {
-	return NewServiceImpl[T](db).GetById(ctx, id)
-}
-
-// GetOne 快捷查询单条
-func GetOne[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) (*T, error) {
-	return NewServiceImpl[T](db).GetOne(ctx, wrapper)
-}
-
-// List 快捷列表查询
-func List[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) ([]*T, error) {
-	return NewServiceImpl[T](db).List(ctx, wrapper)
+	var entity T
+	err := withCtx(db, ctx).First(&entity, id).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &entity, nil
 }
 
 // Count 快捷统计
 func Count[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) (int64, error) {
-	return NewServiceImpl[T](db).Count(ctx, wrapper)
+	var total int64
+	d := withCtx(db, ctx).Model(new(T))
+	if wrapper != nil {
+		d = wrapper.Apply(d)
+	}
+	return total, d.Count(&total).Error
 }
 
 // Insert 快捷插入

@@ -1,400 +1,523 @@
-# GOMP (GO MyBatis-Plus)
+# GOMP — Go MyBatis-Plus
 
-GOMP 是一个基于 [GORM](https://gorm.io/) 的增强库，灵感来源于 MyBatis-Plus。它旨在简化 GORM 的开发流程，提供类似于 MyBatis-Plus 的链式查询构造器（Wrapper）和通用的 Service 层 CRUD 接口。
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://golang.org/)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## ✨ 特性
+GOMP 是一个基于 [GORM](https://gorm.io/) 的增强库，灵感来源于 Java 的 MyBatis-Plus。
+它通过泛型提供链式条件构造器（Wrapper）和通用 Service 层，让 GORM 开发更简洁、更安全。
 
-- **链式构造器**: 提供 `QueryWrapper`、`UpdateWrapper`、`DeleteWrapper`，支持流式构建查询条件。
-- **通用 Service**: 提供基于泛型的 `IService` 接口和 `ServiceImpl` 实现，开箱即用的 CRUD 方法。
-- **内置分页**: 封装 `Page` 对象，轻松实现分页查询。
-- **动态条件**: 所有 Wrapper 方法均支持可选的布尔参数，用于根据业务逻辑动态拼接条件。
-- **非侵入式**: 完全兼容 GORM 原生用法，可随时获取 `*gorm.DB` 进行原生操作。
+---
 
-## 📦 安装
+## 特性
+
+- **链式构造器** — `QueryWrapper`、`UpdateWrapper`、`DeleteWrapper`、`InsertWrapper`，流式构建复杂 SQL 条件
+- **通用 Service** — 泛型 `IService[T]` 接口 + `ServiceImpl[T]` 实现，开箱即用的 CRUD
+- **内置分页** — `Page[T]` 对象 + `SelectPage` / `Page` 方法，一行代码完成分页
+- **动态条件** — 所有条件方法支持末尾可选 `bool` 参数，轻松实现动态拼接
+- **嵌套逻辑** — `And(func)` / `Or(func)` / `AndOr(func...)` 支持任意深度嵌套括号
+- **联表查询** — `LeftJoinOn` / `RightJoinOn` / `InnerJoinOn` 配合 `JoinOnWrapper` 构建复杂 ON 条件
+- **悲观锁** — `ForUpdate()` / `ForShare()` 一键添加行锁
+- **Upsert** — `InsertWrapper` 支持 `OnConflictDoNothing` 和 `OnConflictDoUpdate`
+- **并发安全配置** — `atomic.Pointer` 实现无锁读，支持运行时热更新
+- **非侵入式** — 完全兼容 GORM 原生用法，随时可通过 `GetDB()` 降级
+
+---
+
+## 安装
 
 ```bash
 go get github.com/shelbeii/gomp
 ```
 
-## 🚀 快速开始
+> 要求 Go 1.21+，GORM v1.20+
 
-### 1. 定义模型 (Model)
+---
 
-定义标准的 GORM 模型结构体。
+## 快速开始
+
+### 1. 定义模型
 
 ```go
-package model
-
-import "time"
-
 type User struct {
     ID        int64     `gorm:"primaryKey"`
     Username  string    `gorm:"size:32;unique"`
-    Password  string    `gorm:"size:64"`
     Age       int
     Email     string
     CreatedAt time.Time
     UpdatedAt time.Time
+    DeletedAt gorm.DeletedAt `gorm:"index"` // 软删除
 }
 ```
 
-### 2. 定义 Service
-
-创建一个 Service 结构体，并嵌入 `gomp.ServiceImpl[T]`。
+### 2. 初始化配置（可选）
 
 ```go
-package service
+// 方式一：通过代码设置
+gomp.SetConfig(gomp.GompConfig{
+    EnableSQLPrint:    true,   // 打印 SQL 日志
+    AllowGlobalUpdate: false,  // 禁止无 WHERE 的全表更新
+    AllowGlobalDelete: false,  // 禁止无 WHERE 的全表删除
+    SaveBatchSize:     200,    // 批量插入每批大小（默认 100）
+    PageMaxSize:       500,    // 分页最大条数上限（默认 1000）
+})
 
-import (
-    "github.com/lustfulCap/gomp"
-    "your_project/model"
-    "gorm.io/gorm"
-)
+// 方式二：从 YAML 文件读取
+gomp.InitConfig("config/app.yaml")
+```
 
-// 定义接口 (可选，推荐)
+YAML 示例：
+```yaml
+gomp:
+  enableSqlPrint: false
+  allowGlobalUpdate: false
+  allowGlobalDelete: false
+  saveBatchSize: 100
+  pageMaxSize: 1000
+```
+
+### 3. 创建 Service
+
+```go
 type IUserService interface {
-    gomp.IService[model.User]
-    // 在此定义其他自定义业务方法
+    gomp.IService[User]
+    // 自定义业务方法
+    FindActiveUsers(ctx context.Context) ([]*User, error)
 }
 
-// 实现结构体
 type UserService struct {
-    *gomp.ServiceImpl[model.User]
+    *gomp.ServiceImpl[User]
 }
 
-// 构造函数
 func NewUserService(db *gorm.DB) *UserService {
-    return &UserService{
-        ServiceImpl: gomp.NewServiceImpl[model.User](db),
-    }
+    return &UserService{ServiceImpl: gomp.NewServiceImpl[User](db)}
+}
+
+// 自定义方法示例
+func (s *UserService) FindActiveUsers(ctx context.Context) ([]*User, error) {
+    return s.List(ctx, gomp.NewQueryWrapper[User]().IsNotNull("email"))
 }
 ```
 
-### 3. 使用示例
+### 4. 基础 CRUD
 
 ```go
-package main
+ctx := context.Background()
+userSvc := NewUserService(db)
 
-import (
-    "context"
-    "fmt"
-    "github.com/lustfulCap/gomp"
-    "gorm.io/driver/sqlite" // 或其他驱动
-    "gorm.io/gorm"
-)
+// 新增
+user := &User{Username: "tom", Age: 18, Email: "tom@example.com"}
+userSvc.Save(ctx, user)
 
-func main() {
-    // 1. 初始化 DB
-    db, _ := gorm.Open(sqlite.Open("test.db"), &gorm.Config{})
-    db.AutoMigrate(&model.User{})
+// 批量新增（自动按 SaveBatchSize 分批）
+userSvc.SaveBatch(ctx, users)
+// 也可临时指定批次大小
+userSvc.SaveBatch(ctx, users, 50)
 
-    // 2. 创建 Service
-    userService := NewUserService(db)
-    ctx := context.Background()
+// 根据 ID 查询
+u, _ := userSvc.GetById(ctx, 1)
 
-    // --- 新增 (Create) ---
-    user := &model.User{Username: "tom", Age: 18, Email: "tom@example.com"}
-    userService.Save(ctx, user)
+// 根据 ID 更新（只更新非零字段）
+u.Age = 25
+userSvc.UpdateById(ctx, u)
 
-    // --- 查询 (Read) ---
-    
-    // 根据 ID 查询
-    u, _ := userService.GetById(ctx, user.ID)
-    
-    // 复杂条件查询: 名字是 tom 且 (年龄 > 20 或 邮箱不为空)
-    w := gomp.NewQueryWrapper[model.User]()
-    w.Eq("username", "tom").
-      And(func(sub *gomp.QueryWrapper[model.User]) {
-          sub.Gt("age", 20).Or().IsNotNull("email")
-      })
-    
-    list, _ := userService.List(ctx, w)
+// 根据 ID 删除
+userSvc.RemoveById(ctx, 1)
 
-    // --- 分页查询 (Page) ---
-    page := gomp.NewPage[model.User](1, 10) // 第1页，每页10条
-    query := gomp.NewQueryWrapper[model.User]().Like("username", "t")
-    
-    resultPage, _ := userService.Page(ctx, page, query)
-    fmt.Printf("Total: %d, Records: %d\n", resultPage.Total, len(resultPage.Records))
-
-    // --- 更新 (Update) ---
-    
-    // 方式1: 根据 ID 更新实体 (只更新非零值)
-    u.Age = 25
-    userService.UpdateById(ctx, u)
-
-    // 方式2: 使用 UpdateWrapper 指定更新字段和条件
-    updater := gomp.NewUpdateWrapper[model.User]()
-    updater.Set("age", 30).Set("email", "new@example.com"). // 设置更新的值
-            Eq("username", "tom")                           // 设置条件
-    userService.Update(ctx, updater)
-
-    // --- 删除 (Delete) ---
-    
-    // 根据 ID 删除
-    userService.RemoveById(ctx, user.ID)
-    
-    // 根据条件删除
-    deleter := gomp.NewDeleteWrapper[model.User]()
-    deleter.Le("age", 10) // 删除年龄 <= 10 的
-    userService.Delete(ctx, deleter)
-}
+// 批量 ID 删除
+userSvc.RemoveByIds(ctx, []int64{1, 2, 3})
 ```
 
-## 🛠️ Wrapper 方法概览
+---
 
-### QueryWrapper 方法详解
+## QueryWrapper 详解
 
-`QueryWrapper` 支持大部分常用的 SQL 操作符，以下是详细的使用说明与 SQL 映射关系：
+### 基础条件
 
-| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
-| :--- | :--- | :--- | :--- |
-| `Eq` | 等于 = | `w.Eq("name", "Tom")` | `name = 'Tom'` |
-| `Ne` | 不等于 <> | `w.Ne("status", 1)` | `status <> 1` |
-| `Gt` | 大于 > | `w.Gt("age", 18)` | `age > 18` |
-| `Ge` | 大于等于 >= | `w.Ge("age", 18)` | `age >= 18` |
-| `Lt` | 小于 < | `w.Lt("price", 100)` | `price < 100` |
-| `Le` | 小于等于 <= | `w.Le("price", 100)` | `price <= 100` |
-| `Like` | 模糊查询 | `w.Like("name", "k")` | `name LIKE '%k%'` |
-| `LikeLeft` | 左模糊 | `w.LikeLeft("name", "k")` | `name LIKE '%k'` |
-| `LikeRight` | 右模糊 | `w.LikeRight("name", "k")` | `name LIKE 'k%'` |
-| `In` | IN 查询 | `w.In("id", []int{1, 2, 3})` | `id IN (1, 2, 3)` |
-| `NotIn` | NOT IN 查询 | `w.NotIn("id", []int{1, 2})` | `id NOT IN (1, 2)` |
-| `IsNull` | IS NULL | `w.IsNull("deleted_at")` | `deleted_at IS NULL` |
-| `IsNotNull` | IS NOT NULL | `w.IsNotNull("email")` | `email IS NOT NULL` |
-| `Between` | 区间查询 | `w.Between("age", 18, 30)` | `age BETWEEN 18 AND 30` |
-| `NotBetween` | NOT 区间 | `w.NotBetween("age", 18, 30)` | `age NOT BETWEEN 18 AND 30` |
-| `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `a = 1 OR b = 2` |
-| `Or` (嵌套) | OR 嵌套 | `w.Or(func(sw){ sw.Eq("a", 1).Eq("b", 2) })` | `OR (a = 1 AND b = 2)` |
-| `And` | AND 嵌套 | `w.And(func(sw){ sw.Eq("a", 1).Or().Eq("b", 2) })` | `AND (a = 1 OR b = 2)` |
-| `Select` | 指定字段 | `w.Select("id", "name", "age")` | `SELECT id, name, age` |
-| `Distinct` | 去重 | `w.Distinct("age")` | `SELECT DISTINCT age` |
-| `OrderByAsc` | 升序 | `w.OrderByAsc("created_at")` | `ORDER BY created_at ASC` |
-| `OrderByDesc` | 降序 | `w.OrderByDesc("score")` | `ORDER BY score DESC` |
-| `GroupBy` | 分组 | `w.GroupBy("dept_id")` | `GROUP BY dept_id` |
-| `Having` | 分组筛选 | `w.GroupBy("dept").Having("count(*) > ?", 5)` | `GROUP BY dept HAVING count(*) > 5` |
-| `LeftJoin` | 左连接 | `w.LeftJoin("user u", "u.id = order.uid")` | `LEFT JOIN user u ON u.id = order.uid` |
-| `RightJoin` | 右连接 | `w.RightJoin("user u", "u.id = order.uid")` | `RIGHT JOIN user u ON u.id = order.uid` |
-| `InnerJoin` | 内连接 | `w.InnerJoin("user u", "u.id = order.uid")` | `INNER JOIN user u ON u.id = order.uid` |
-| `LeftJoinOn` | 左连接(条件构造器) | `w.LeftJoinOn("user u", "u.id", "order.uid", func(on *gomp.JoinOnWrapper){ on.Gt("order.amount", 100) })` | `LEFT JOIN user u ON u.id = order.uid AND order.amount > 100` |
-| `RightJoinOn` | 右连接(条件构造器) | `w.RightJoinOn("user u", "u.id", "order.uid", func(on *gomp.JoinOnWrapper){ on.Or().IsNull("order.deleted_at") })` | `RIGHT JOIN user u ON u.id = order.uid OR order.deleted_at IS NULL` |
-| `InnerJoinOn` | 内连接(条件构造器) | `w.InnerJoinOn("user u", "u.id", "order.uid", func(on *gomp.JoinOnWrapper){ on.And(func(sw *gomp.JoinOnWrapper){ sw.Gt("order.amount", 100).Or().Gt("order.discount", 0) }) })` | `INNER JOIN user u ON u.id = order.uid AND (order.amount > 100 OR order.discount > 0)` |
-| `Table` | 指定表名 | `w.Table("users as u")` | `FROM users as u` |
+```go
+w := gomp.NewQueryWrapper[User]().
+    Eq("username", "tom").          // username = 'tom'
+    Ge("age", 18).                  // AND age >= 18
+    Like("email", "gmail").         // AND email LIKE '%gmail%'
+    In("status", []int{1, 2}).      // AND status IN (1, 2)
+    IsNotNull("deleted_at")         // AND deleted_at IS NOT NULL
 
-**Join 条件构造器（JoinOnWrapper）**
+list, _ := userSvc.List(ctx, w)
+```
 
-`JoinOnWrapper` 用于拼接 JOIN 的 ON 条件，支持 AND / OR 混合与分组，减少手写 SQL 拼接错误。与 `LeftJoinOn` / `RightJoinOn` / `InnerJoinOn` 搭配使用。
+### 动态条件（末尾 bool 参数）
 
-**基础用法**（生成的 SQL）
+```go
+keyword := ""  // 来自前端，可能为空
+minAge  := 0
+
+w := gomp.NewQueryWrapper[User]().
+    Like("username", keyword, keyword != "").  // keyword 为空时忽略此条件
+    Ge("age", minAge, minAge > 0)             // minAge <= 0 时忽略
+
+list, _ := userSvc.List(ctx, w)
+```
+
+### OR 条件
+
+```go
+// 简单 OR：a = 1 OR b = 2
+w := gomp.NewQueryWrapper[User]().
+    Eq("status", 1).Or().Eq("status", 2)
+
+// 嵌套 OR：AND (a = 1 OR b = 2)
+w := gomp.NewQueryWrapper[User]().
+    Eq("role", "admin").
+    Or(func(sw *gomp.QueryWrapper[User]) {
+        sw.Eq("status", 1).Eq("verified", true)
+    })
+// => WHERE role = 'admin' OR (status = 1 AND verified = true)
+
+// 多分支 OR 合并后 AND：AND ((c1) OR (c2) OR (c3))
+w := gomp.NewQueryWrapper[User]().
+    Eq("role", "user").
+    And(func(sw *gomp.QueryWrapper[User]) {
+        sw.Eq("status", 1)
+    }).
+    AndOr(
+        func(sw *gomp.QueryWrapper[User]) { sw.Between("age", 18, 25) },
+        func(sw *gomp.QueryWrapper[User]) { sw.Between("age", 60, 70) },
+    )
+// => WHERE role = 'user' AND status = 1
+//    AND ((age BETWEEN 18 AND 25) OR (age BETWEEN 60 AND 70))
+```
+
+### 分页查询
+
+```go
+// 方式一：使用 Page 对象
+page := gomp.NewPage[User](1, 10) // 第 1 页，每页 10 条
+w := gomp.NewQueryWrapper[User]().Like("username", "t").OrderByDesc("created_at")
+result, _ := userSvc.Page(ctx, page, w)
+fmt.Printf("总数: %d, 总页数: %d, 当前页记录数: %d\n",
+    result.Total, result.Pages(), len(result.Records))
+fmt.Println("有下一页:", result.HasNext())
+
+// 方式二：直接传页码和条数
+result, _ := userSvc.SelectPage(ctx, 2, 20, w)
+```
+
+### 排序、分组、去重
+
+```go
+w := gomp.NewQueryWrapper[User]().
+    Select("dept_id", "count(*) as cnt"). // 指定查询字段
+    GroupBy("dept_id").                   // GROUP BY
+    Having("count(*) > ?", 5).            // HAVING
+    OrderByDesc("cnt").                   // ORDER BY cnt DESC
+    Distinct("dept_id")                   // DISTINCT
+```
+
+### 手动分页（Limit / Offset）
+
+```go
+w := gomp.NewQueryWrapper[User]().
+    OrderByAsc("id").
+    Limit(20).
+    Offset(40) // 第 3 页（每页 20 条）
+
+list, _ := userSvc.List(ctx, w)
+```
+
+### 悲观锁
+
+```go
+// SELECT ... FOR UPDATE（需在事务中使用）
+db.Transaction(func(tx *gorm.DB) error {
+    svc := gomp.NewServiceImpl[User](tx)
+    w := gomp.NewQueryWrapper[User]().Eq("id", 1).ForUpdate()
+    u, _ := svc.GetOne(ctx, w)
+    // ... 修改并保存
+    return svc.UpdateById(ctx, u)
+})
+
+// SELECT ... FOR SHARE
+w := gomp.NewQueryWrapper[User]().Eq("id", 1).ForShare()
+```
+
+### 联表查询
+
+```go
+// 简单 JOIN
+w := gomp.NewQueryWrapper[UserVO]().
+    Table("user u").
+    Select("u.id", "u.username", "o.amount").
+    LeftJoin("order o", "o.user_id", "u.id").
+    Gt("o.amount", 100)
+
+// 带自定义 ON 条件的 JOIN
+w := gomp.NewQueryWrapper[UserVO]().
+    Table("user u").
+    LeftJoinOn("order o", "o.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
+        on.IsNull("o.deleted_at").
+           And(func(sw *gomp.JoinOnWrapper) {
+               sw.Eq("o.status", "paid").Or().Gt("o.amount", 500)
+           })
+    }).
+    Gt("o.amount", 100)
+// LEFT JOIN order o ON o.user_id = u.id
+//   AND o.deleted_at IS NULL
+//   AND (o.status = 'paid' OR o.amount > 500)
+```
+
+### 列间比较 EqColumn
+
+```go
+// WHERE a.ref_id = b.id
+w := gomp.NewQueryWrapper[MyVO]().
+    Table("table_a a").
+    InnerJoin("table_b b", "b.id", "a.ref_id").
+    EqColumn("a.created_by", "b.owner_id") // WHERE a.created_by = b.owner_id
+```
+
+### 原生 SQL 片段
+
+```go
+w := gomp.NewQueryWrapper[User]().
+    Raw("DATE(created_at) = ?", "2024-01-01").
+    Gt("age", 18)
+```
+
+### 全部方法速查
+
+| 方法 | 说明 | SQL 片段示例 |
+|------|------|--------------|
+| `Eq(col, val)` | 等于 | `col = ?` |
+| `Ne(col, val)` | 不等于 | `col <> ?` |
+| `Gt(col, val)` | 大于 | `col > ?` |
+| `Ge(col, val)` | 大于等于 | `col >= ?` |
+| `Lt(col, val)` | 小于 | `col < ?` |
+| `Le(col, val)` | 小于等于 | `col <= ?` |
+| `Like(col, val)` | 模糊 | `col LIKE '%val%'` |
+| `LikeLeft(col, val)` | 左模糊 | `col LIKE '%val'` |
+| `LikeRight(col, val)` | 右模糊 | `col LIKE 'val%'` |
+| `In(col, slice)` | IN | `col IN (...)` |
+| `NotIn(col, slice)` | NOT IN | `col NOT IN (...)` |
+| `IsNull(col)` | NULL | `col IS NULL` |
+| `IsNotNull(col)` | NOT NULL | `col IS NOT NULL` |
+| `Between(col, v1, v2)` | 区间 | `col BETWEEN ? AND ?` |
+| `NotBetween(col, v1, v2)` | NOT 区间 | `col NOT BETWEEN ? AND ?` |
+| `EqColumn(left, right)` | 列间比较 | `left = right` |
+| `Raw(sql, args...)` | 原生片段 | 原样插入 |
+| `Or()` | 下一个条件用 OR | — |
+| `Or(f1, f2, ...)` | 多子条件 OR 分组 | `OR (f1 OR f2 ...)` |
+| `And(f1, f2, ...)` | 多子条件 AND 分组 | `AND (f1 AND f2 ...)` |
+| `AndOr(f1, f2, ...)` | 多子条件 OR 后整体 AND | `AND (f1 OR f2 ...)` |
+| `Select(cols...)` | 指定字段 | `SELECT ...` |
+| `Distinct(args...)` | 去重 | `DISTINCT` |
+| `Table(name)` | 指定表名/别名 | `FROM name` |
+| `OrderByAsc(col)` | 升序 | `ORDER BY col ASC` |
+| `OrderByDesc(col)` | 降序 | `ORDER BY col DESC` |
+| `GroupBy(cols...)` | 分组 | `GROUP BY ...` |
+| `Having(sql, args...)` | 分组筛选 | `HAVING ...` |
+| `Limit(n)` | 限制条数 | `LIMIT n` |
+| `Offset(n)` | 偏移量 | `OFFSET n` |
+| `ForUpdate()` | 悲观排他锁 | `FOR UPDATE` |
+| `ForShare()` | 悲观共享锁 | `FOR SHARE` |
+| `LeftJoin(table, left, right)` | 左连接 | `LEFT JOIN ... ON ...` |
+| `RightJoin(table, left, right)` | 右连接 | `RIGHT JOIN ... ON ...` |
+| `InnerJoin(table, left, right)` | 内连接 | `INNER JOIN ... ON ...` |
+| `LeftJoinOn(table, left, right, fn)` | 自定义 ON 左连接 | `LEFT JOIN ... ON ... AND ...` |
+| `RightJoinOn(table, left, right, fn)` | 自定义 ON 右连接 | `RIGHT JOIN ... ON ... AND ...` |
+| `InnerJoinOn(table, left, right, fn)` | 自定义 ON 内连接 | `INNER JOIN ... ON ... AND ...` |
+
+---
+
+## UpdateWrapper 详解
+
+```go
+// 基础更新
+w := gomp.NewUpdateWrapper[User]().
+    Set("age", 30).
+    Set("email", "new@example.com").
+    Eq("username", "tom")
+userSvc.Update(ctx, w)
+
+// 字段自增 / 自减
+w := gomp.NewUpdateWrapper[User]().
+    SetIncrBy("login_count", 1).  // login_count = login_count + 1
+    SetDecrBy("credits", 10).     // credits = credits - 10
+    Eq("id", 1)
+
+// 表达式更新（SetRaw）
+w := gomp.NewUpdateWrapper[User]().
+    SetRaw("meta", "JSON_SET(meta, '$.vip', ?)", true).
+    Eq("id", 1)
+
+// 联表更新
+w := gomp.NewUpdateWrapper[User]().
+    Table("user u").
+    LeftJoin("order o", "o.user_id", "u.id").
+    Set("u.vip", 1).
+    Gt("o.amount", 1000)
+userSvc.Update(ctx, w)
+```
+
+| 方法 | 说明 |
+|------|------|
+| `Set(col, val)` | 设置更新值 |
+| `SetIncrBy(col, val)` | 字段自增 `col = col + val` |
+| `SetDecrBy(col, val)` | 字段自减 `col = col - val` |
+| `SetRaw(col, expr, args...)` | 表达式更新 |
+| `Table(name)` | 指定表名/别名 |
+| `EqColumn(left, right)` | 列间比较 |
+| `Raw(sql, args...)` | 原生条件 |
+| 所有条件方法 | 同 QueryWrapper |
+| `LeftJoin` / `RightJoin` / `InnerJoin` | 联表更新 |
+| `LeftJoinOn` / `RightJoinOn` / `InnerJoinOn` | 自定义 ON 联表更新 |
+
+---
+
+## DeleteWrapper 详解
+
+```go
+// 软删除（默认）
+w := gomp.NewDeleteWrapper[User]().Le("age", 10)
+userSvc.Delete(ctx, w)
+
+// 硬删除（物理删除）
+w := gomp.NewDeleteWrapper[User]().
+    UseSoftDelete(false).
+    Eq("id", 1)
+userSvc.Delete(ctx, w)
+
+// 联表删除
+w := gomp.NewDeleteWrapper[User]().
+    Table("user u").
+    LeftJoinOn("login_log l", "l.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
+        on.Lt("l.login_time", "2023-01-01")
+    }).
+    IsNull("u.active_at")
+userSvc.Delete(ctx, w)
+```
+
+---
+
+## InsertWrapper 详解
+
+```go
+// 普通插入
+w := gomp.NewInsertWrapper[User]().
+    Set("username", "tom").
+    Set("age", 18)
+userSvc.Insert(ctx, w)
+
+// 冲突时忽略
+w := gomp.NewInsertWrapper[User]().
+    Set("username", "tom").Set("age", 18).
+    OnConflictDoNothing()
+
+// 冲突时更新所有字段（Upsert）
+w := gomp.NewInsertWrapper[User]().
+    Set("username", "tom").Set("age", 20).
+    OnConflictDoUpdate([]string{"username"})
+
+// 冲突时只更新指定字段
+w := gomp.NewInsertWrapper[User]().
+    Set("username", "tom").Set("age", 20).Set("email", "new@example.com").
+    OnConflictDoUpdate([]string{"username"}, "age", "email")
+```
+
+---
+
+## JoinOnWrapper 详解
 
 ```go
 w.LeftJoinOn(
-    "t_purchase_contract_component pcc",
-    "pcc.id",
-    "ind.purchase_contract_component_id",
-    func(on *gomp.JoinOnWrapper) {
-        on.Gt("ind.purchase_contract_component_id", 0).
-            And(func(sw *gomp.JoinOnWrapper) {
-                sw.Gt("pcc.id", 0).Or().IsNull("pcc.deleted_at")
-            })
-    },
-)
-```
-对应 SQL：
-```
-LEFT JOIN t_purchase_contract_component pcc
-  ON pcc.id = ind.purchase_contract_component_id
- AND ind.purchase_contract_component_id > 0
- AND (pcc.id > 0 OR pcc.deleted_at IS NULL)
-```
-
-**OR 分组示例**（生成的 SQL）
-
-```go
-w.InnerJoinOn(
-    "t_integration_notice_detail ind",
-    "ind.id",
-    "pdod.integration_notice_detail_id",
-    func(on *gomp.JoinOnWrapper) {
-        on.And(func(sw *gomp.JoinOnWrapper) {
-            sw.Eq("ind.notice_status", "4").Or().Eq("ind.notice_status", "5")
-        })
-    },
-)
-```
-对应 SQL：
-```
-INNER JOIN t_integration_notice_detail ind
-  ON ind.id = pdod.integration_notice_detail_id
- AND (ind.notice_status = '4' OR ind.notice_status = '5')
-```
-
-**多条件混合示例**（生成的 SQL）
-
-```go
-w.RightJoinOn(
-    "t_order o",
-    "o.user_id",
-    "u.id",
+    "t_order o", "o.user_id", "u.id",
     func(on *gomp.JoinOnWrapper) {
         on.IsNull("o.deleted_at").
-           And(func(sw *gomp.JoinOnWrapper){ sw.Gt("o.amount", 100).Or().Gt("o.discount", 0) }).
-           And(func(sw *gomp.JoinOnWrapper){ sw.Raw("o.status IN ('paid','shipped')") })
+           And(func(sw *gomp.JoinOnWrapper) {
+               sw.Eq("o.status", "paid").Or().Gt("o.amount", 500)
+           }).
+           Raw("o.flag = 1")
     },
 )
+// LEFT JOIN t_order o
+//   ON o.user_id = u.id
+//   AND o.deleted_at IS NULL
+//   AND (o.status = 'paid' OR o.amount > 500)
+//   AND o.flag = 1
 ```
-对应 SQL：
-```
-RIGHT JOIN t_order o
-  ON o.user_id = u.id
- AND o.deleted_at IS NULL
- AND (o.amount > 100 OR o.discount > 0)
- AND (o.status IN ('paid','shipped'))
-```
-**JoinOnWrapper 常用方法**
 
-| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
-| :--- | :--- | :--- | :--- |
-| `Eq` | 等于 = | `on.Eq("a.id", 1)` | `a.id = 1` |
-| `EqColumn` | 列等于列 | `on.EqColumn("a.id", "b.a_id")` | `a.id = b.a_id` |
-| `Ne` | 不等于 <> | `on.Ne("a.status", 1)` | `a.status <> 1` |
-| `Gt` | 大于 > | `on.Gt("a.amount", 10)` | `a.amount > 10` |
-| `Ge` | 大于等于 >= | `on.Ge("a.amount", 10)` | `a.amount >= 10` |
-| `Lt` | 小于 < | `on.Lt("a.amount", 10)` | `a.amount < 10` |
-| `Le` | 小于等于 <= | `on.Le("a.amount", 10)` | `a.amount <= 10` |
-| `Like` | 模糊查询 | `on.Like("a.name", "k")` | `a.name LIKE '%k%'` |
-| `LikeLeft` | 左模糊 | `on.LikeLeft("a.name", "k")` | `a.name LIKE '%k'` |
-| `LikeRight` | 右模糊 | `on.LikeRight("a.name", "k")` | `a.name LIKE 'k%'` |
-| `In` | IN 查询 | `on.In("a.id", []int{1,2})` | `a.id IN (1,2)` |
-| `NotIn` | NOT IN 查询 | `on.NotIn("a.id", []int{1,2})` | `a.id NOT IN (1,2)` |
-| `IsNull` | IS NULL | `on.IsNull("a.deleted_at")` | `a.deleted_at IS NULL` |
-| `IsNotNull` | IS NOT NULL | `on.IsNotNull("a.deleted_at")` | `a.deleted_at IS NOT NULL` |
-| `Between` | 区间查询 | `on.Between("a.score", 1, 10)` | `a.score BETWEEN 1 AND 10` |
-| `NotBetween` | NOT 区间 | `on.NotBetween("a.score", 1, 10)` | `a.score NOT BETWEEN 1 AND 10` |
-| `Or` | OR 连接 | `on.Eq("a.type", 1).Or().Eq("a.type", 2)` | `a.type = 1 OR a.type = 2` |
-| `And` | AND 分组 | `on.And(func(sw *gomp.JoinOnWrapper){...})` | `AND (...)` |
-| `Raw` | 原始条件 | `on.Raw("a.flag = 1")` | `a.flag = 1` |
+| 方法 | 说明 |
+|------|------|
+| `Eq` / `Ne` / `Gt` / `Ge` / `Lt` / `Le` | 比较操作符 |
+| `EqColumn(left, right)` | 列间等值比较 |
+| `Like` / `LikeLeft` / `LikeRight` | 模糊匹配 |
+| `In` / `NotIn` | IN 查询 |
+| `IsNull` / `IsNotNull` | NULL 判断 |
+| `Between` / `NotBetween` | 区间判断 |
+| `Or()` | 下一个条件用 OR |
+| `Or(fn)` | OR 嵌套子句 |
+| `And(fn)` | AND 嵌套子句 |
+| `Raw(sql, args...)` | 原生条件片段 |
 
-### UpdateWrapper 方法详解
+---
 
-`UpdateWrapper` 用于构建更新语句，支持设置更新字段 (`Set`) 以及各种 `WHERE` 条件。
+## 包级快捷函数
 
-| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
-| :--- | :--- | :--- | :--- |
-| `Set` | 设置更新值 | `w.Set("age", 20)` | `SET age = 20` |
-| `SetIncrBy` | 字段自增 | `w.SetIncrBy("count", 1)` | `SET count = count + 1` |
-| `SetDecrBy` | 字段自减 | `w.SetDecrBy("stock", 1)` | `SET stock = stock - 1` |
-| `Eq` | 等于 = | `w.Eq("name", "Tom")` | `WHERE name = 'Tom'` |
-| `Ne` | 不等于 <> | `w.Ne("status", 1)` | `WHERE status <> 1` |
-| `Gt` | 大于 > | `w.Gt("age", 18)` | `WHERE age > 18` |
-| `Ge` | 大于等于 >= | `w.Ge("age", 18)` | `WHERE age >= 18` |
-| `Lt` | 小于 < | `w.Lt("price", 100)` | `WHERE price < 100` |
-| `Le` | 小于等于 <= | `w.Le("price", 100)` | `WHERE price <= 100` |
-| `Like` | 模糊查询 | `w.Like("name", "k")` | `WHERE name LIKE '%k%'` |
-| `LikeLeft` | 左模糊 | `w.LikeLeft("name", "k")` | `WHERE name LIKE '%k'` |
-| `LikeRight` | 右模糊 | `w.LikeRight("name", "k")` | `WHERE name LIKE 'k%'` |
-| `In` | IN 查询 | `w.In("id", []int{1, 2})` | `WHERE id IN (1, 2)` |
-| `NotIn` | NOT IN 查询 | `w.NotIn("id", []int{1, 2})` | `WHERE id NOT IN (1, 2)` |
-| `IsNull` | IS NULL | `w.IsNull("deleted_at")` | `WHERE deleted_at IS NULL` |
-| `IsNotNull` | IS NOT NULL | `w.IsNotNull("email")` | `WHERE email IS NOT NULL` |
-| `Between` | 区间查询 | `w.Between("age", 18, 30)` | `WHERE age BETWEEN 18 AND 30` |
-| `NotBetween` | NOT 区间 | `w.NotBetween("age", 18, 30)` | `WHERE age NOT BETWEEN 18 AND 30` |
-| `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `WHERE a = 1 OR b = 2` |
-| `And` | AND 嵌套 | `w.And(func(sw){...})` | `WHERE ... AND (...)` |
-| `Table` | 指定表名 | `w.Table("users u")` | `FROM users u` |
-
-#### 联表更新示例
-
-`UpdateWrapper` 支持 `Join` 语法，可实现多表关联更新。
-
-**简单关联更新**
+无需创建 Service 实例，直接传入 `*gorm.DB`：
 
 ```go
-// UPDATE user u LEFT JOIN order o ON o.user_id = u.id SET u.email = 'vip@example.com' WHERE o.amount > 1000
-updater := gomp.NewUpdateWrapper[model.User]()
-updater.Table("user u"). // 显式指定别名 u
-        LeftJoin("order o", "o.user_id", "u.id").
-        Set("u.email", "vip@example.com").
-        Gt("o.amount", 1000)
-userService.Update(ctx, updater)
+// 查询
+list, _  := gomp.SelectList[User](ctx, db, wrapper)
+one, _   := gomp.SelectOne[User](ctx, db, wrapper)
+page, _  := gomp.SelectPage[User](ctx, db, 1, 10, wrapper)
+count, _ := gomp.Count[User](ctx, db, wrapper)
+u, _     := gomp.GetById[User](ctx, db, 1)
+
+// 写入
+gomp.Save[User](ctx, db, &user)
+gomp.SaveBatch[User](ctx, db, users)
+gomp.SaveBatch[User](ctx, db, users, 50) // 指定批次大小
+gomp.UpdateById[User](ctx, db, &user)
+gomp.RemoveById[User](ctx, db, 1)
+gomp.RemoveByIds[User](ctx, db, []int64{1, 2, 3})
+
+// Wrapper 操作
+gomp.Insert[User](ctx, db, insertWrapper)
+gomp.Update[User](ctx, db, updateWrapper)
+gomp.Delete[User](ctx, db, deleteWrapper)
+gomp.Paginate[User](ctx, db, page, wrapper)
 ```
 
-**复杂条件关联更新**
+---
+
+## Page 对象
 
 ```go
-// 使用 LeftJoinOn 自定义 ON 条件
-updater := gomp.NewUpdateWrapper[model.User]()
-updater.Table("user u").
-        LeftJoinOn("order o", "o.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
-            on.Gt("o.amount", 1000).Or().Eq("o.status", "paid")
-        }).Set("u.vip_level", 2)
+page := gomp.NewPage[User](1, 20) // current=1, size=20
 
-userService.Update(ctx, updater)
+result, _ := userSvc.Page(ctx, page, wrapper)
+result.Total     // 总记录数
+result.Records   // 当前页数据 []*User
+result.Pages()   // 总页数
+result.HasNext() // 是否有下一页
+result.HasPrev() // 是否有上一页
+result.Offset()  // 当前页偏移量
+result.Limit()   // 当前页大小
 ```
 
-### DeleteWrapper 方法详解
+---
 
-`DeleteWrapper` 用于构建删除语句，支持各种 `WHERE` 条件。
+## 配置说明
 
-| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
-| :--- | :--- | :--- | :--- |
-| `Eq` | 等于 = | `w.Eq("name", "Tom")` | `WHERE name = 'Tom'` |
-| `Ne` | 不等于 <> | `w.Ne("status", 1)` | `WHERE status <> 1` |
-| `Gt` | 大于 > | `w.Gt("age", 18)` | `WHERE age > 18` |
-| `Ge` | 大于等于 >= | `w.Ge("age", 18)` | `WHERE age >= 18` |
-| `Lt` | 小于 < | `w.Lt("price", 100)` | `WHERE price < 100` |
-| `Le` | 小于等于 <= | `w.Le("price", 100)` | `WHERE price <= 100` |
-| `Like` | 模糊查询 | `w.Like("name", "k")` | `WHERE name LIKE '%k%'` |
-| `LikeLeft` | 左模糊 | `w.LikeLeft("name", "k")` | `WHERE name LIKE '%k'` |
-| `LikeRight` | 右模糊 | `w.LikeRight("name", "k")` | `WHERE name LIKE 'k%'` |
-| `In` | IN 查询 | `w.In("id", []int{1, 2})` | `WHERE id IN (1, 2)` |
-| `NotIn` | NOT IN 查询 | `w.NotIn("id", []int{1, 2})` | `WHERE id NOT IN (1, 2)` |
-| `IsNull` | IS NULL | `w.IsNull("deleted_at")` | `WHERE deleted_at IS NULL` |
-| `IsNotNull` | IS NOT NULL | `w.IsNotNull("email")` | `WHERE email IS NOT NULL` |
-| `Between` | 区间查询 | `w.Between("age", 18, 30)` | `WHERE age BETWEEN 18 AND 30` |
-| `NotBetween` | NOT 区间 | `w.NotBetween("age", 18, 30)` | `WHERE age NOT BETWEEN 18 AND 30` |
-| `Or` | OR 连接 | `w.Eq("a", 1).Or().Eq("b", 2)` | `WHERE a = 1 OR b = 2` |
-| `And` | AND 嵌套 | `w.And(func(sw){...})` | `WHERE ... AND (...)` |
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `EnableSQLPrint` | `bool` | `false` | 打印完整 SQL 日志 |
+| `AllowGlobalUpdate` | `bool` | `false` | 允许无 WHERE 全表更新 |
+| `AllowGlobalDelete` | `bool` | `false` | 允许无 WHERE 全表删除 |
+| `SaveBatchSize` | `int` | `100` | 批量插入每批大小，范围 [1, 5000] |
+| `PageMaxSize` | `int` | `1000` | 分页最大条数上限，范围 [1, 10000] |
 
-#### 联表删除示例
+---
 
-`DeleteWrapper` 支持 `Join` 语法，可实现多表关联删除。
+## 许可证
 
-**简单关联删除**
-
-```go
-// DELETE u FROM user u LEFT JOIN order o ON o.user_id = u.id WHERE o.status = 'cancelled'
-deleter := gomp.NewDeleteWrapper[model.User]()
-deleter.Table("user u"). // 显式指定别名 u
-        LeftJoin("order o", "o.user_id", "u.id").
-        Eq("o.status", "cancelled")
-userService.Delete(ctx, deleter)
-```
-
-**复杂条件关联删除**
-
-```go
-// 使用 LeftJoinOn 自定义 ON 条件
-deleter := gomp.NewDeleteWrapper[model.User]()
-deleter.Table("user u").
-        LeftJoinOn("login_log l", "l.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
-            on.Lt("l.login_time", "2023-01-01")
-        }).IsNull("u.active_at") // 删除很久没登录且未激活的用户
-
-userService.Delete(ctx, deleter)
-```
-
-### InsertWrapper 方法详解
-
-`InsertWrapper` 用于构建插入语句，主要用于指定插入的字段和值。
-
-| 方法 | 说明 | 示例代码 | 对应 SQL 结构 (示例) |
-| :--- | :--- | :--- | :--- |
-| `Set` | 设置插入值 | `w.Set("name", "Tom")` | `INSERT INTO ... (name) VALUES ('Tom')` |
-
-> **提示**: 所有方法最后一个参数支持传入 `bool` 类型条件。例如：`w.Eq("name", name, name != "")`，只有当 `name != ""` 为 true 时，该条件才会生效。
-
-## 📋 要求
-
-- Go 1.18+ (泛型支持)
-- GORM v1.20+
+[MIT License](LICENSE)
+ 
