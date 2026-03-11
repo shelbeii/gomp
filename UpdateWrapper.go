@@ -37,7 +37,6 @@ func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrap
 		w.or = true
 		return w
 	}
-	isOr := w.or
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		firstSub := NewUpdateWrapper[T]()
@@ -48,9 +47,6 @@ func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrap
 			f(nextSub)
 			nextDB := nextSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
 			subDB = subDB.Or(nextDB)
-		}
-		if isOr {
-			return db.Or(subDB)
 		}
 		return db.Or(subDB)
 	})

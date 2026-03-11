@@ -35,7 +35,6 @@ func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper
 		w.or = true
 		return w
 	}
-	isOr := w.or
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		firstSub := NewQueryWrapper[T]()
@@ -46,9 +45,6 @@ func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper
 			f(nextSub)
 			nextDB := nextSub.Apply(db.Session(&gorm.Session{NewDB: true}))
 			subDB = subDB.Or(nextDB)
-		}
-		if isOr {
-			return db.Or(subDB)
 		}
 		return db.Or(subDB)
 	})

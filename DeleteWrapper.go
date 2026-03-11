@@ -43,7 +43,6 @@ func (w *DeleteWrapper[T]) Or(conditions ...func(*DeleteWrapper[T])) *DeleteWrap
 		w.or = true
 		return w
 	}
-	isOr := w.or
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		firstSub := NewDeleteWrapper[T]()
@@ -54,9 +53,6 @@ func (w *DeleteWrapper[T]) Or(conditions ...func(*DeleteWrapper[T])) *DeleteWrap
 			f(nextSub)
 			nextDB := nextSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
 			subDB = subDB.Or(nextDB)
-		}
-		if isOr {
-			return db.Or(subDB)
 		}
 		return db.Or(subDB)
 	})
