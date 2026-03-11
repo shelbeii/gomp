@@ -127,12 +127,17 @@ func (s *ServiceImpl[T]) List(ctx context.Context, wrapper *QueryWrapper[T]) ([]
 // Page 分页查询
 func (s *ServiceImpl[T]) Page(ctx context.Context, page *Page[T], wrapper *QueryWrapper[T]) (*Page[T], error) {
 	entities := make([]*T, 0)
-	db := s.getDB(ctx).Model(new(T))
+	db := s.getDB(ctx)
 	if wrapper != nil {
 		db = wrapper.Apply(db)
 	}
+	// 若 wrapper 未指定 Table，则尝试用 Model(new(T)) 推断表名（普通 Model 场景）
+	if db.Statement == nil || db.Statement.Table == "" {
+		db = db.Model(new(T))
+	}
 	var total int64
-	if err := db.Session(&gorm.Session{NewDB: true}).Count(&total).Error; err != nil {
+	// 用 Session(SkipHooks+SkipDefaultTransaction) 克隆当前 db 做 COUNT，保留 Table/JOIN/WHERE
+	if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	page.Total = total
@@ -157,9 +162,12 @@ func (s *ServiceImpl[T]) SelectPage(ctx context.Context, current, size int64, wr
 // Count 统计记录数
 func (s *ServiceImpl[T]) Count(ctx context.Context, wrapper *QueryWrapper[T]) (int64, error) {
 	var total int64
-	db := s.getDB(ctx).Model(new(T))
+	db := s.getDB(ctx)
 	if wrapper != nil {
 		db = wrapper.Apply(db)
+	}
+	if db.Statement == nil || db.Statement.Table == "" {
+		db = db.Model(new(T))
 	}
 	err := db.Count(&total).Error
 	return total, err
@@ -309,9 +317,12 @@ func GetById[T any](ctx context.Context, db *gorm.DB, id any) (*T, error) {
 // Count 快捷统计
 func Count[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) (int64, error) {
 	var total int64
-	d := withCtx(db, ctx).Model(new(T))
+	d := withCtx(db, ctx)
 	if wrapper != nil {
 		d = wrapper.Apply(d)
+	}
+	if d.Statement == nil || d.Statement.Table == "" {
+		d = d.Model(new(T))
 	}
 	return total, d.Count(&total).Error
 }
