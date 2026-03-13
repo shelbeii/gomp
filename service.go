@@ -276,8 +276,9 @@ func execJoinUpdate(db *gorm.DB, values map[string]any) error {
 
 	// 查找关键字位置
 	whereIdx := findKeywordIndex(fromPart, "WHERE")
-	joinIdx := findKeywordIndex(fromPart, "JOIN")
 
+	// 查找第一个 JOIN（可能是 LEFT JOIN, RIGHT JOIN, INNER JOIN 或 JOIN）
+	joinIdx := findFirstJoinIndex(fromPart)
 	if joinIdx < 0 {
 		return errors.New("no JOIN found in query")
 	}
@@ -319,6 +320,7 @@ func execJoinUpdate(db *gorm.DB, values map[string]any) error {
 	sqlBuilder.WriteString(mainTable)
 	sqlBuilder.WriteString(" ")
 	sqlBuilder.WriteString(mainAlias)
+	sqlBuilder.WriteString(" ")                          // 添加空格分隔主表和 JOIN
 	sqlBuilder.WriteString(fromPart[joinIdx:joinEndIdx]) // JOIN 子句
 	sqlBuilder.WriteString(" SET ")
 	sqlBuilder.WriteString(strings.Join(setClauses, ", "))
@@ -331,6 +333,22 @@ func execJoinUpdate(db *gorm.DB, values map[string]any) error {
 	}
 
 	return db.Exec(sqlBuilder.String(), args...).Error
+}
+
+// findFirstJoinIndex 查找第一个 JOIN 关键字的位置（包括 LEFT JOIN, RIGHT JOIN, INNER JOIN）
+func findFirstJoinIndex(sql string) int {
+	// 按优先级查找：LEFT JOIN, RIGHT JOIN, INNER JOIN, JOIN
+	joinTypes := []string{"LEFT JOIN", "RIGHT JOIN", "INNER JOIN", "JOIN"}
+
+	minIdx := -1
+	for _, joinType := range joinTypes {
+		idx := findKeywordIndex(sql, joinType)
+		if idx >= 0 && (minIdx < 0 || idx < minIdx) {
+			minIdx = idx
+		}
+	}
+
+	return minIdx
 }
 
 // findKeywordIndex 使用大小写不敏感的方式查找 SQL 关键字
