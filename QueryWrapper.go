@@ -41,12 +41,31 @@ func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper
 		sess := db.Session(&gorm.Session{NewDB: true})
 		firstSub := NewQueryWrapper[T]()
 		conditions[0](firstSub)
+
+		// 如果第一个子条件为空，检查是否有其他非空子条件
+		if !firstSub.hasConditions() {
+			for _, f := range conditions[1:] {
+				nextSub := NewQueryWrapper[T]()
+				f(nextSub)
+				if nextSub.hasConditions() {
+					firstSub = nextSub
+					break
+				}
+			}
+			// 如果所有子条件都为空，直接返回
+			if !firstSub.hasConditions() {
+				return db
+			}
+		}
+
 		subDB := firstSub.applyScopes(sess)
 		for _, f := range conditions[1:] {
 			nextSub := NewQueryWrapper[T]()
 			f(nextSub)
-			nextDB := nextSub.applyScopes(sess)
-			subDB = subDB.Or(nextDB)
+			if nextSub.hasConditions() {
+				nextDB := nextSub.applyScopes(sess)
+				subDB = subDB.Or(nextDB)
+			}
 		}
 		return db.Or(subDB)
 	})
@@ -68,12 +87,31 @@ func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrappe
 		sess := db.Session(&gorm.Session{NewDB: true})
 		firstSub := NewQueryWrapper[T]()
 		conditions[0](firstSub)
+
+		// 如果第一个子条件为空，检查是否有其他非空子条件
+		if !firstSub.hasConditions() {
+			for _, f := range conditions[1:] {
+				nextSub := NewQueryWrapper[T]()
+				f(nextSub)
+				if nextSub.hasConditions() {
+					firstSub = nextSub
+					break
+				}
+			}
+			// 如果所有子条件都为空，直接返回
+			if !firstSub.hasConditions() {
+				return db
+			}
+		}
+
 		subDB := firstSub.applyScopes(sess)
 		for _, f := range conditions[1:] {
 			nextSub := NewQueryWrapper[T]()
 			f(nextSub)
-			nextDB := nextSub.applyScopes(sess)
-			subDB = subDB.Where(nextDB)
+			if nextSub.hasConditions() {
+				nextDB := nextSub.applyScopes(sess)
+				subDB = subDB.Where(nextDB)
+			}
 		}
 		if isOr {
 			return db.Or(subDB)
@@ -96,12 +134,31 @@ func (w *QueryWrapper[T]) AndOr(conditions ...func(*QueryWrapper[T])) *QueryWrap
 		sess := db.Session(&gorm.Session{NewDB: true})
 		firstSub := NewQueryWrapper[T]()
 		conditions[0](firstSub)
+
+		// 如果第一个子条件为空，检查是否有其他非空子条件
+		if !firstSub.hasConditions() {
+			for _, f := range conditions[1:] {
+				nextSub := NewQueryWrapper[T]()
+				f(nextSub)
+				if nextSub.hasConditions() {
+					firstSub = nextSub
+					break
+				}
+			}
+			// 如果所有子条件都为空，直接返回
+			if !firstSub.hasConditions() {
+				return db
+			}
+		}
+
 		subDB := firstSub.applyScopes(sess)
 		for _, f := range conditions[1:] {
 			nextSub := NewQueryWrapper[T]()
 			f(nextSub)
-			nextDB := nextSub.applyScopes(sess)
-			subDB = subDB.Or(nextDB)
+			if nextSub.hasConditions() {
+				nextDB := nextSub.applyScopes(sess)
+				subDB = subDB.Or(nextDB)
+			}
 		}
 		if isOr {
 			return db.Or(subDB)

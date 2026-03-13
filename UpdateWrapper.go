@@ -43,19 +43,23 @@ func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrap
 	w.or = false
 
 	// 预先构建所有子条件，避免在 scope 闭包中重复创建
-	subWrappers := make([]*UpdateWrapper[T], len(conditions))
-	for i, cond := range conditions {
+	subWrappers := make([]*UpdateWrapper[T], 0, len(conditions))
+	for _, cond := range conditions {
 		sub := NewUpdateWrapper[T]()
 		cond(sub)
-		subWrappers[i] = sub
+		// 只保留有条件的子 wrapper
+		if sub.hasConditions() {
+			subWrappers = append(subWrappers, sub)
+		}
+	}
+
+	// 如果所有子条件都为空，直接返回
+	if len(subWrappers) == 0 {
+		return w
 	}
 
 	// 使用单个 scope 处理所有子条件，减少闭包分配
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		if len(subWrappers) == 0 {
-			return db
-		}
-
 		// 使用空 DB session 避免继承外部条件
 		sess := db.Session(&gorm.Session{NewDB: true})
 		subDB := subWrappers[0].applyScopes(sess)
@@ -80,19 +84,23 @@ func (w *UpdateWrapper[T]) And(conditions ...func(*UpdateWrapper[T])) *UpdateWra
 	w.or = false
 
 	// 预先构建所有子条件，避免在 scope 闭包中重复创建
-	subWrappers := make([]*UpdateWrapper[T], len(conditions))
-	for i, cond := range conditions {
+	subWrappers := make([]*UpdateWrapper[T], 0, len(conditions))
+	for _, cond := range conditions {
 		sub := NewUpdateWrapper[T]()
 		cond(sub)
-		subWrappers[i] = sub
+		// 只保留有条件的子 wrapper
+		if sub.hasConditions() {
+			subWrappers = append(subWrappers, sub)
+		}
+	}
+
+	// 如果所有子条件都为空，直接返回
+	if len(subWrappers) == 0 {
+		return w
 	}
 
 	// 使用单个 scope 处理所有子条件，减少闭包分配
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		if len(subWrappers) == 0 {
-			return db
-		}
-
 		// 使用空 DB session 避免继承外部条件
 		sess := db.Session(&gorm.Session{NewDB: true})
 		subDB := subWrappers[0].applyScopes(sess)
