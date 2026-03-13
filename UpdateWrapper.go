@@ -9,6 +9,7 @@ type UpdateWrapper[T any] struct {
 	conditionMixin
 	values    map[string]any
 	tableName string
+	hasJoin   bool // 是否包含 JOIN（联表 UPDATE 需走 Exec 路径）
 }
 
 // NewUpdateWrapper 创建更新条件构造器
@@ -258,6 +259,7 @@ func (w *UpdateWrapper[T]) NotBetween(column string, val1, val2 any, condition .
 
 // LeftJoin 左连接
 func (w *UpdateWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn string) *UpdateWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Joins("LEFT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
@@ -266,6 +268,7 @@ func (w *UpdateWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn
 
 // RightJoin 右连接
 func (w *UpdateWrapper[T]) RightJoin(table string, leftColumn string, rightColumn string) *UpdateWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Joins("RIGHT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
@@ -274,6 +277,7 @@ func (w *UpdateWrapper[T]) RightJoin(table string, leftColumn string, rightColum
 
 // InnerJoin 内连接
 func (w *UpdateWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *UpdateWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Joins("INNER JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
@@ -282,18 +286,21 @@ func (w *UpdateWrapper[T]) InnerJoin(table string, leftColumn string, rightColum
 
 // LeftJoinOn 左连接（自定义 ON 条件）
 func (w *UpdateWrapper[T]) LeftJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *UpdateWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, buildJoinScope("LEFT JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
 // RightJoinOn 右连接（自定义 ON 条件）
 func (w *UpdateWrapper[T]) RightJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *UpdateWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, buildJoinScope("RIGHT JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
 // InnerJoinOn 内连接（自定义 ON 条件）
 func (w *UpdateWrapper[T]) InnerJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *UpdateWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, buildJoinScope("INNER JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }

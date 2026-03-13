@@ -224,10 +224,6 @@ func (s *ServiceImpl[T]) Update(ctx context.Context, wrapper *UpdateWrapper[T]) 
 	if wrapper.hasJoin {
 		return execJoinUpdate(db, wrapper.values)
 	}
-	// 普通 UPDATE：指定了 Table 时直接 Updates，否则用 Model(new(T)) 推断表名
-	if wrapper.tableName != "" {
-		return db.Updates(wrapper.values).Error
-	}
 	return db.Model(new(T)).Updates(wrapper.values).Error
 }
 
