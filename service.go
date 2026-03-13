@@ -231,78 +231,78 @@ func (s *ServiceImpl[T]) Update(ctx context.Context, wrapper *UpdateWrapper[T]) 
 
 	db := wrapper.Apply(s.getDB(ctx))
 
-	// 联表 UPDATE：GORM Updates(map) 不携带 JOIN，改用 DryRun+Exec 执行原生 SQL
+	// 联表 UPDATE：使用原生 SQL 执行
 	if wrapper.hasJoin {
 		return execJoinUpdate(db, wrapper.values)
 	}
 
-	// 普通 UPDATE：指定了 Table 时直接 Updates，否则用 Model(new(T)) 推断表名
+	// 普通 UPDATE：使用 GORM 的 Updates 方法（会触发钩子和自动更新）
 	if wrapper.tableName != "" {
 		return db.Updates(wrapper.values).Error
 	}
 	return db.Model(new(T)).Updates(wrapper.values).Error
 }
 
-// execJoinUpdate 联表 UPDATE 通过手动构建 SQL 执行
-// GORM 的 Updates(map) 不携带 JOIN，此函数手动构建完整的 UPDATE SQL
+// execJoinUpdate 执行联表 UPDATE
+// 注意：联表更新使用原生 SQL，不会触发 GORM 钩子
+// 如需自动更新时间字段，请手动添加：SetRaw("updated_at", "NOW()") 或 Set("updated_at", time.Now())
 func execJoinUpdate(db *gorm.DB, values map[string]any) error {
 	if len(values) == 0 {
 		return errors.New("no values to update")
 	}
 
-	// 先执行一次 DryRun 获取已应用的 Table 和 JOIN 信息
+	// 通过 DryRun 获取完整的 SELECT 语句（包含 JOIN）
 	dryStmt := db.Session(&gorm.Session{DryRun: true}).Find(nil)
 	if dryStmt.Error != nil {
 		return dryStmt.Error
 	}
 
-	// 从 DryRun 的 Statement 中提取 SQL 和参数
 	selectSQL := dryStmt.Statement.SQL.String()
 	if selectSQL == "" {
-		return errors.New("failed to generate SELECT statement for JOIN UPDATE")
+		return errors.New("failed to generate SELECT statement")
 	}
 	selectVars := dryStmt.Statement.Vars
 
-	// 使用 strings.Index 快速查找关键字（比逐字符遍历快）
+	// 解析 SQL 结构
 	fromIdx := findKeywordIndex(selectSQL, "FROM")
 	if fromIdx < 0 {
-		return errors.New("failed to parse SELECT statement: FROM not found")
+		return errors.New("invalid SQL: FROM not found")
 	}
 
-	// 提取 FROM 之后的部分
 	fromPart := selectSQL[fromIdx+4:] // 跳过 "FROM"
 	if len(fromPart) == 0 {
-		return errors.New("invalid SELECT statement: empty FROM clause")
+		return errors.New("invalid SQL: empty FROM clause")
 	}
 
-	// 查找 WHERE/ORDER BY/LIMIT 等关键字位置
+	// 查找关键字位置
 	whereIdx := findKeywordIndex(fromPart, "WHERE")
-	orderIdx := findKeywordIndex(fromPart, "ORDER BY")
-	limitIdx := findKeywordIndex(fromPart, "LIMIT")
+	joinIdx := findKeywordIndex(fromPart, "JOIN")
 
-	// 确定 JOIN 子句的结束位置（WHERE/ORDER BY/LIMIT 中最早出现的）
-	endIdx := len(fromPart)
-	if whereIdx >= 0 && whereIdx < endIdx {
-		endIdx = whereIdx
-	}
-	if orderIdx >= 0 && orderIdx < endIdx {
-		endIdx = orderIdx
-	}
-	if limitIdx >= 0 && limitIdx < endIdx {
-		endIdx = limitIdx
+	if joinIdx < 0 {
+		return errors.New("no JOIN found in query")
 	}
 
-	// 预分配容量，减少内存分配
+	// 确定 JOIN 子句的结束位置
+	joinEndIdx := len(fromPart)
+	if whereIdx >= 0 {
+		joinEndIdx = whereIdx
+	}
+
+	// 提取主表信息（表名和别名）
+	mainTablePart := strings.TrimSpace(fromPart[:joinIdx])
+	tableParts := strings.Fields(mainTablePart)
+	if len(tableParts) < 2 {
+		return errors.New("table must have an alias for JOIN UPDATE")
+	}
+	mainTable := tableParts[0]
+	mainAlias := tableParts[1]
+
+	// 构建 SET 子句
 	setClauses := make([]string, 0, len(values))
 	args := make([]interface{}, 0, len(values)+len(selectVars))
 
-	// 构建 SET 子句（确保顺序稳定，用于测试和调试）
 	for col, val := range values {
 		if expr, ok := val.(clause.Expr); ok {
-			// 处理表达式（如 gorm.Expr）
-			if expr.SQL == "" {
-				return errors.New("invalid expression: empty SQL")
-			}
 			setClauses = append(setClauses, db.Statement.Quote(col)+" = "+expr.SQL)
 			args = append(args, expr.Vars...)
 		} else {
@@ -311,30 +311,26 @@ func execJoinUpdate(db *gorm.DB, values map[string]any) error {
 		}
 	}
 
-	// 使用 strings.Builder 高效拼接 SQL（避免多次内存分配）
+	// 构建完整的 UPDATE SQL
 	var sqlBuilder strings.Builder
-	// 预估容量：UPDATE + FROM部分 + SET + 子句 + WHERE部分
-	estimatedSize := 7 + endIdx + 5 + len(values)*30 + (len(fromPart) - endIdx)
-	sqlBuilder.Grow(estimatedSize)
+	sqlBuilder.Grow(100 + len(fromPart) + len(values)*30)
 
-	sqlBuilder.WriteString("UPDATE")
-	sqlBuilder.WriteString(fromPart[:endIdx])
+	sqlBuilder.WriteString("UPDATE ")
+	sqlBuilder.WriteString(mainTable)
+	sqlBuilder.WriteString(" ")
+	sqlBuilder.WriteString(mainAlias)
+	sqlBuilder.WriteString(fromPart[joinIdx:joinEndIdx]) // JOIN 子句
 	sqlBuilder.WriteString(" SET ")
 	sqlBuilder.WriteString(strings.Join(setClauses, ", "))
 
-	// 添加 WHERE 子句（如果存在）
+	// 添加 WHERE 子句
 	if whereIdx >= 0 {
+		sqlBuilder.WriteString(" ")
 		sqlBuilder.WriteString(fromPart[whereIdx:])
-		// 合并参数：SET 子句的参数 + WHERE 子句的参数
 		args = append(args, selectVars...)
 	}
 
-	updateSQL := sqlBuilder.String()
-	if updateSQL == "" {
-		return errors.New("failed to build UPDATE SQL")
-	}
-
-	return db.Exec(updateSQL, args...).Error
+	return db.Exec(sqlBuilder.String(), args...).Error
 }
 
 // findKeywordIndex 使用大小写不敏感的方式查找 SQL 关键字
