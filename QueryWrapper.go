@@ -37,13 +37,15 @@ func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper
 	}
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		// 使用空 DB session 避免继承外部条件
+		sess := db.Session(&gorm.Session{NewDB: true})
 		firstSub := NewQueryWrapper[T]()
 		conditions[0](firstSub)
-		subDB := firstSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+		subDB := firstSub.applyScopes(sess)
 		for _, f := range conditions[1:] {
 			nextSub := NewQueryWrapper[T]()
 			f(nextSub)
-			nextDB := nextSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+			nextDB := nextSub.applyScopes(sess)
 			subDB = subDB.Or(nextDB)
 		}
 		return db.Or(subDB)
@@ -62,13 +64,15 @@ func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrappe
 	isOr := w.or
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		// 使用空 DB session 避免继承外部条件
+		sess := db.Session(&gorm.Session{NewDB: true})
 		firstSub := NewQueryWrapper[T]()
 		conditions[0](firstSub)
-		subDB := firstSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+		subDB := firstSub.applyScopes(sess)
 		for _, f := range conditions[1:] {
 			nextSub := NewQueryWrapper[T]()
 			f(nextSub)
-			nextDB := nextSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+			nextDB := nextSub.applyScopes(sess)
 			subDB = subDB.Where(nextDB)
 		}
 		if isOr {
@@ -88,13 +92,15 @@ func (w *QueryWrapper[T]) AndOr(conditions ...func(*QueryWrapper[T])) *QueryWrap
 	isOr := w.or
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		// 使用空 DB session 避免继承外部条件
+		sess := db.Session(&gorm.Session{NewDB: true})
 		firstSub := NewQueryWrapper[T]()
 		conditions[0](firstSub)
-		subDB := firstSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+		subDB := firstSub.applyScopes(sess)
 		for _, f := range conditions[1:] {
 			nextSub := NewQueryWrapper[T]()
 			f(nextSub)
-			nextDB := nextSub.Apply(db.Session(&gorm.Session{NewDB: true}))
+			nextDB := nextSub.applyScopes(sess)
 			subDB = subDB.Or(nextDB)
 		}
 		if isOr {

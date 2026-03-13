@@ -56,7 +56,7 @@ func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrap
 			return db
 		}
 
-		// 复用 session 配置
+		// 使用空 DB session 避免继承外部条件
 		sess := db.Session(&gorm.Session{NewDB: true})
 		subDB := subWrappers[0].applyScopes(sess)
 
@@ -93,7 +93,7 @@ func (w *UpdateWrapper[T]) And(conditions ...func(*UpdateWrapper[T])) *UpdateWra
 			return db
 		}
 
-		// 复用 session 配置
+		// 使用空 DB session 避免继承外部条件
 		sess := db.Session(&gorm.Session{NewDB: true})
 		subDB := subWrappers[0].applyScopes(sess)
 
