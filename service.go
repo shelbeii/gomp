@@ -130,16 +130,27 @@ func (s *ServiceImpl[T]) List(ctx context.Context, wrapper *QueryWrapper[T]) ([]
 func (s *ServiceImpl[T]) Page(ctx context.Context, page *Page[T], wrapper *QueryWrapper[T]) (*Page[T], error) {
 	entities := make([]*T, 0)
 	db := s.getDB(ctx)
+
+	// 先应用 wrapper 的条件
 	if wrapper != nil {
 		db = wrapper.Apply(db)
 	}
+
 	// 若 wrapper 未指定 Table，则尝试用 Model(new(T)) 推断表名（普通 Model 场景）
+	// 注意：Model 必须在 wrapper.Apply 之后设置，这样才能正确应用软删除等条件
 	if db.Statement == nil || db.Statement.Table == "" {
 		db = db.Model(new(T))
 	}
+
 	var total int64
-	// 用 Session(SkipHooks+SkipDefaultTransaction) 克隆当前 db 做 COUNT，保留 Table/JOIN/WHERE
-	if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
+	// 用 Session 克隆当前 db 做 COUNT，保留 Table/JOIN/WHERE 和 Model 的软删除条件
+	// 注意：必须使用 Model(new(T)) 来确保 COUNT 也应用软删除条件
+	countDB := db.Session(&gorm.Session{})
+	// 如果 wrapper 指定了 Table（联表查询），需要重新设置 Model 以应用软删除
+	if wrapper != nil && db.Statement != nil && db.Statement.Table != "" {
+		countDB = countDB.Model(new(T))
+	}
+	if err := countDB.Count(&total).Error; err != nil {
 		return nil, err
 	}
 	page.Total = total
