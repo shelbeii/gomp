@@ -1,6 +1,8 @@
 package gomp
 
 import (
+	"strings"
+
 	"gorm.io/gorm"
 )
 
@@ -16,7 +18,7 @@ type UpdateWrapper[T any] struct {
 func NewUpdateWrapper[T any]() *UpdateWrapper[T] {
 	return &UpdateWrapper[T]{
 		conditionMixin: newConditionMixin(),
-		values:         make(map[string]any),
+		values:         make(map[string]any, 8), // 预分配常见容量
 	}
 }
 
@@ -39,14 +41,27 @@ func (w *UpdateWrapper[T]) Or(conditions ...func(*UpdateWrapper[T])) *UpdateWrap
 		return w
 	}
 	w.or = false
+
+	// 预先构建所有子条件，避免在 scope 闭包中重复创建
+	subWrappers := make([]*UpdateWrapper[T], len(conditions))
+	for i, cond := range conditions {
+		sub := NewUpdateWrapper[T]()
+		cond(sub)
+		subWrappers[i] = sub
+	}
+
+	// 使用单个 scope 处理所有子条件，减少闭包分配
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		firstSub := NewUpdateWrapper[T]()
-		conditions[0](firstSub)
-		subDB := firstSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
-		for _, f := range conditions[1:] {
-			nextSub := NewUpdateWrapper[T]()
-			f(nextSub)
-			nextDB := nextSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
+		if len(subWrappers) == 0 {
+			return db
+		}
+
+		// 复用 session 配置
+		sess := db.Session(&gorm.Session{NewDB: true})
+		subDB := subWrappers[0].applyScopes(sess)
+
+		for i := 1; i < len(subWrappers); i++ {
+			nextDB := subWrappers[i].applyScopes(sess)
 			subDB = subDB.Or(nextDB)
 		}
 		return db.Or(subDB)
@@ -60,18 +75,33 @@ func (w *UpdateWrapper[T]) And(conditions ...func(*UpdateWrapper[T])) *UpdateWra
 		w.or = false
 		return w
 	}
+
 	isOr := w.or
 	w.or = false
+
+	// 预先构建所有子条件，避免在 scope 闭包中重复创建
+	subWrappers := make([]*UpdateWrapper[T], len(conditions))
+	for i, cond := range conditions {
+		sub := NewUpdateWrapper[T]()
+		cond(sub)
+		subWrappers[i] = sub
+	}
+
+	// 使用单个 scope 处理所有子条件，减少闭包分配
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		firstSub := NewUpdateWrapper[T]()
-		conditions[0](firstSub)
-		subDB := firstSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
-		for _, f := range conditions[1:] {
-			nextSub := NewUpdateWrapper[T]()
-			f(nextSub)
-			nextDB := nextSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
+		if len(subWrappers) == 0 {
+			return db
+		}
+
+		// 复用 session 配置
+		sess := db.Session(&gorm.Session{NewDB: true})
+		subDB := subWrappers[0].applyScopes(sess)
+
+		for i := 1; i < len(subWrappers); i++ {
+			nextDB := subWrappers[i].applyScopes(sess)
 			subDB = subDB.Where(nextDB)
 		}
+
 		if isOr {
 			return db.Or(subDB)
 		}
@@ -260,8 +290,19 @@ func (w *UpdateWrapper[T]) NotBetween(column string, val1, val2 any, condition .
 // LeftJoin 左连接
 func (w *UpdateWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn string) *UpdateWrapper[T] {
 	w.hasJoin = true
+	// 使用 strings.Builder 预构建 JOIN SQL，避免每次查询时重复拼接
+	var sb strings.Builder
+	sb.Grow(11 + len(table) + 5 + len(leftColumn) + 3 + len(rightColumn))
+	sb.WriteString("LEFT JOIN ")
+	sb.WriteString(table)
+	sb.WriteString(" ON ")
+	sb.WriteString(leftColumn)
+	sb.WriteString(" = ")
+	sb.WriteString(rightColumn)
+	joinSQL := sb.String()
+
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins("LEFT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
+		return db.Joins(joinSQL)
 	})
 	return w
 }
@@ -269,8 +310,18 @@ func (w *UpdateWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn
 // RightJoin 右连接
 func (w *UpdateWrapper[T]) RightJoin(table string, leftColumn string, rightColumn string) *UpdateWrapper[T] {
 	w.hasJoin = true
+	var sb strings.Builder
+	sb.Grow(12 + len(table) + 5 + len(leftColumn) + 3 + len(rightColumn))
+	sb.WriteString("RIGHT JOIN ")
+	sb.WriteString(table)
+	sb.WriteString(" ON ")
+	sb.WriteString(leftColumn)
+	sb.WriteString(" = ")
+	sb.WriteString(rightColumn)
+	joinSQL := sb.String()
+
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins("RIGHT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
+		return db.Joins(joinSQL)
 	})
 	return w
 }
@@ -278,8 +329,18 @@ func (w *UpdateWrapper[T]) RightJoin(table string, leftColumn string, rightColum
 // InnerJoin 内连接
 func (w *UpdateWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *UpdateWrapper[T] {
 	w.hasJoin = true
+	var sb strings.Builder
+	sb.Grow(12 + len(table) + 5 + len(leftColumn) + 3 + len(rightColumn))
+	sb.WriteString("INNER JOIN ")
+	sb.WriteString(table)
+	sb.WriteString(" ON ")
+	sb.WriteString(leftColumn)
+	sb.WriteString(" = ")
+	sb.WriteString(rightColumn)
+	joinSQL := sb.String()
+
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
-		return db.Joins("INNER JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
+		return db.Joins(joinSQL)
 	})
 	return w
 }
@@ -317,4 +378,24 @@ func (w *UpdateWrapper[T]) Apply(db *gorm.DB) *gorm.DB {
 // hasWhereConditions 检查是否有 WHERE 条件
 func (w *UpdateWrapper[T]) hasWhereConditions() bool {
 	return w.hasConditions()
+}
+
+// HasValues 检查是否有要更新的值
+func (w *UpdateWrapper[T]) HasValues() bool {
+	return len(w.values) > 0
+}
+
+// IsEmpty 检查 wrapper 是否为空（没有值也没有条件）
+func (w *UpdateWrapper[T]) IsEmpty() bool {
+	return len(w.values) == 0 && !w.hasConditions()
+}
+
+// GetTableName 获取表名
+func (w *UpdateWrapper[T]) GetTableName() string {
+	return w.tableName
+}
+
+// HasJoin 检查是否包含 JOIN
+func (w *UpdateWrapper[T]) HasJoin() bool {
+	return w.hasJoin
 }
