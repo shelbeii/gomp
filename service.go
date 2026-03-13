@@ -220,6 +220,11 @@ func (s *ServiceImpl[T]) Update(ctx context.Context, wrapper *UpdateWrapper[T]) 
 		return errors.New("global update is not allowed without WHERE clause; set AllowGlobalUpdate=true to override")
 	}
 	db := wrapper.Apply(s.getDB(ctx))
+	// 联表更新（指定了 Table）时直接用当前 db.Updates，避免 Model(new(T)) 覆盖表名并丢失 JOIN
+	// 未指定 Table 时用 Model(new(T)) 让 GORM 推断表名及软删除字段
+	if wrapper.tableName != "" {
+		return db.Updates(wrapper.values).Error
+	}
 	return db.Model(new(T)).Updates(wrapper.values).Error
 }
 
