@@ -463,6 +463,52 @@ func (w *QueryWrapper[T]) InnerJoinOn(table string, leftColumn string, rightColu
 	return w
 }
 
+// LeftJoinSubQuery 左连接子查询
+// subQuery: 子查询 SQL，如 "SELECT id, AVG(score) AS avg_score FROM t GROUP BY id"
+// alias:    子查询别名，如 "agg"
+// leftCol:  主表关联列，如 "opt.id"
+// rightCol: 子查询关联列，如 "agg.task_id"
+// args:     子查询中的参数（对应 subQuery 中的 ?）
+//
+// 示例：
+//
+//	wrapper.LeftJoinSubQuery(
+//	    "SELECT task_id, AVG(score) AS avg_score FROM t_scores WHERE status = ? GROUP BY task_id",
+//	    "agg", "opt.id", "agg.task_id", 1,
+//	)
+func (w *QueryWrapper[T]) LeftJoinSubQuery(subQuery string, alias string, leftCol string, rightCol string, args ...any) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, buildSubQueryJoinScope("LEFT JOIN", subQuery, alias, leftCol, rightCol, args...))
+	return w
+}
+
+// RightJoinSubQuery 右连接子查询
+// 参数含义同 LeftJoinSubQuery
+func (w *QueryWrapper[T]) RightJoinSubQuery(subQuery string, alias string, leftCol string, rightCol string, args ...any) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, buildSubQueryJoinScope("RIGHT JOIN", subQuery, alias, leftCol, rightCol, args...))
+	return w
+}
+
+// InnerJoinSubQuery 内连接子查询
+// 参数含义同 LeftJoinSubQuery
+func (w *QueryWrapper[T]) InnerJoinSubQuery(subQuery string, alias string, leftCol string, rightCol string, args ...any) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, buildSubQueryJoinScope("INNER JOIN", subQuery, alias, leftCol, rightCol, args...))
+	return w
+}
+
+// JoinRaw 原生 JOIN，完整传入 JOIN 语句，支持任意复杂写法
+// joinSQL: 完整 JOIN 语句，如 "LEFT JOIN t_user u ON u.id = t.user_id AND u.status = ?"
+// args:    joinSQL 中的参数
+//
+// 示例：
+//
+//	wrapper.JoinRaw("LEFT JOIN t_user u ON u.id = t.user_id AND u.status = ?", 1)
+func (w *QueryWrapper[T]) JoinRaw(joinSQL string, args ...any) *QueryWrapper[T] {
+	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		return db.Joins(joinSQL, args...)
+	})
+	return w
+}
+
 // Apply 应用所有条件到 GORM DB
 func (w *QueryWrapper[T]) Apply(db *gorm.DB) *gorm.DB {
 	if len(w.selects) > 0 {

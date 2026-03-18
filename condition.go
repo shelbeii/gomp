@@ -132,3 +132,28 @@ func buildJoinScope(joinType, table, leftColumn, rightColumn string, builders ..
 		return db.Joins(joinSQL, args...)
 	}
 }
+
+// buildSubQueryJoinScope 构造子查询 JOIN scope
+// joinType: JOIN 类型，如 "LEFT JOIN", "RIGHT JOIN", "INNER JOIN"
+// subQuery: 子查询 SQL（不含括号），如 "SELECT id, AVG(score) AS avg FROM t GROUP BY id"
+// alias:    子查询别名
+// leftCol:  主表关联列
+// rightCol: 子查询关联列
+// args:     子查询中的参数
+func buildSubQueryJoinScope(joinType, subQuery, alias, leftCol, rightCol string, args ...any) func(*gorm.DB) *gorm.DB {
+	var sb strings.Builder
+	sb.Grow(len(joinType) + len(subQuery) + len(alias) + len(leftCol) + len(rightCol) + 16)
+	sb.WriteString(joinType)
+	sb.WriteString(" (")
+	sb.WriteString(subQuery)
+	sb.WriteString(") ")
+	sb.WriteString(alias)
+	sb.WriteString(" ON ")
+	sb.WriteString(leftCol)
+	sb.WriteString(" = ")
+	sb.WriteString(rightCol)
+	joinSQL := sb.String()
+	return func(db *gorm.DB) *gorm.DB {
+		return db.Joins(joinSQL, args...)
+	}
+}
