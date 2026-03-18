@@ -345,6 +345,22 @@ func (w *QueryWrapper[T]) Select(columns ...string) *QueryWrapper[T] {
 	return w
 }
 
+// SelectAs 指定查询字段并取别名
+// expr:  字段或表达式，如 "opt.id"、"COALESCE(agg.rate, 0)"
+// alias: 别名，如 "task_id"、"rate"
+//
+// 示例：
+//
+//	wrapper.SelectAs("COALESCE(agg.product_rate, 0)", "product_rate")
+//	// 生成：COALESCE(agg.product_rate, 0) AS product_rate
+//
+//	wrapper.SelectAs("opt.id", "task_id")
+//	// 生成：opt.id AS task_id
+func (w *QueryWrapper[T]) SelectAs(expr string, alias string) *QueryWrapper[T] {
+	w.selects = append(w.selects, expr+" AS "+alias)
+	return w
+}
+
 // OrderByDesc 降序
 func (w *QueryWrapper[T]) OrderByDesc(column string) *QueryWrapper[T] {
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
