@@ -45,14 +45,35 @@ func (w *DeleteWrapper[T]) Or(conditions ...func(*DeleteWrapper[T])) *DeleteWrap
 	}
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		// 使用空 DB session 避免继承外部条件
+		sess := db.Session(&gorm.Session{NewDB: true})
 		firstSub := NewDeleteWrapper[T]()
 		conditions[0](firstSub)
-		subDB := firstSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
+
+		// 如果第一个子条件为空，检查是否有其他非空子条件
+		if !firstSub.hasConditions() {
+			for _, f := range conditions[1:] {
+				nextSub := NewDeleteWrapper[T]()
+				f(nextSub)
+				if nextSub.hasConditions() {
+					firstSub = nextSub
+					break
+				}
+			}
+			// 如果所有子条件都为空，直接返回
+			if !firstSub.hasConditions() {
+				return db
+			}
+		}
+
+		subDB := firstSub.applyScopes(sess)
 		for _, f := range conditions[1:] {
 			nextSub := NewDeleteWrapper[T]()
 			f(nextSub)
-			nextDB := nextSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
-			subDB = subDB.Or(nextDB)
+			if nextSub.hasConditions() {
+				nextDB := nextSub.applyScopes(sess)
+				subDB = subDB.Or(nextDB)
+			}
 		}
 		return db.Or(subDB)
 	})
@@ -68,14 +89,35 @@ func (w *DeleteWrapper[T]) And(conditions ...func(*DeleteWrapper[T])) *DeleteWra
 	isOr := w.or
 	w.or = false
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
+		// 使用空 DB session 避免继承外部条件
+		sess := db.Session(&gorm.Session{NewDB: true})
 		firstSub := NewDeleteWrapper[T]()
 		conditions[0](firstSub)
-		subDB := firstSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
+
+		// 如果第一个子条件为空，检查是否有其他非空子条件
+		if !firstSub.hasConditions() {
+			for _, f := range conditions[1:] {
+				nextSub := NewDeleteWrapper[T]()
+				f(nextSub)
+				if nextSub.hasConditions() {
+					firstSub = nextSub
+					break
+				}
+			}
+			// 如果所有子条件都为空，直接返回
+			if !firstSub.hasConditions() {
+				return db
+			}
+		}
+
+		subDB := firstSub.applyScopes(sess)
 		for _, f := range conditions[1:] {
 			nextSub := NewDeleteWrapper[T]()
 			f(nextSub)
-			nextDB := nextSub.applyScopes(db.Session(&gorm.Session{NewDB: true}))
-			subDB = subDB.Where(nextDB)
+			if nextSub.hasConditions() {
+				nextDB := nextSub.applyScopes(sess)
+				subDB = subDB.Where(nextDB)
+			}
 		}
 		if isOr {
 			return db.Or(subDB)

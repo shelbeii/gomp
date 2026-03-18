@@ -66,7 +66,8 @@ func SelectList[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T
 	if wrapper != nil {
 		d = wrapper.Apply(d)
 	}
-	return entities, d.Find(&entities).Error
+	err := d.Find(&entities).Error
+	return entities, err
 }
 
 // SelectOne 快捷单条查询
@@ -143,7 +144,8 @@ func Count[T any](ctx context.Context, db *gorm.DB, wrapper *QueryWrapper[T]) (i
 	if d.Statement == nil || d.Statement.Table == "" {
 		d = d.Model(new(T))
 	}
-	return total, d.Count(&total).Error
+	err := d.Count(&total).Error
+	return total, err
 }
 
 // Insert 快捷插入
@@ -212,43 +214,6 @@ func Update[T any](ctx context.Context, db *gorm.DB, wrapper *UpdateWrapper[T]) 
 		return d.Updates(wrapper.values).Error
 	}
 	return d.Model(new(T)).Updates(wrapper.values).Error
-}
-
-// Paginate 快捷分页
-func Paginate[T any](ctx context.Context, db *gorm.DB, page *Page[T], wrapper *QueryWrapper[T]) (*Page[T], error) {
-	entities := make([]*T, 0)
-	d := withCtx(db, ctx)
-
-	// 先应用 wrapper 的条件
-	if wrapper != nil {
-		d = wrapper.Apply(d)
-	}
-
-	// 若 wrapper 未指定 Table，则尝试用 Model(new(T)) 推断表名（普通 Model 场景）
-	if d.Statement == nil || d.Statement.Table == "" {
-		d = d.Model(new(T))
-	}
-
-	var total int64
-	countDB := d.Session(&gorm.Session{})
-	if wrapper != nil && d.Statement != nil && d.Statement.Table != "" {
-		countDB = countDB.Model(new(T))
-	}
-	if err := countDB.Count(&total).Error; err != nil {
-		return nil, err
-	}
-	page.Total = total
-	if total == 0 {
-		return page, nil
-	}
-	if page.Size > 0 {
-		d = d.Offset(page.Offset()).Limit(page.Limit())
-	}
-	if err := d.Find(&entities).Error; err != nil {
-		return nil, err
-	}
-	page.Records = entities
-	return page, nil
 }
 
 // execJoinUpdate 执行联表 UPDATE
@@ -325,7 +290,7 @@ func execJoinUpdate(db *gorm.DB, values map[string]any) error {
 	sqlBuilder.Grow(100 + len(fromPart) + len(values)*30)
 
 	sqlBuilder.WriteString("UPDATE ")
-	sqlBuilder.WriteString(mainTable)
+	sqlBuilder.WriteString(db.Statement.Quote(mainTable))
 	sqlBuilder.WriteString(" ")
 	sqlBuilder.WriteString(mainAlias)
 	sqlBuilder.WriteString(" ")                          // 添加空格分隔主表和 JOIN

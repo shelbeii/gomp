@@ -37,12 +37,17 @@ func (w *JoinOnWrapper) Or(conditions ...func(*JoinOnWrapper)) *JoinOnWrapper {
 		w.or = true
 		return w
 	}
-	sub := NewJoinOnWrapper()
-	conditions[0](sub)
-	clause, args := sub.Build()
-	if strings.TrimSpace(clause) != "" {
-		w.or = true
-		w.addCondition("("+clause+")", args...)
+	// 处理所有条件，用 OR 连接
+	for i, cond := range conditions {
+		sub := NewJoinOnWrapper()
+		cond(sub)
+		clause, args := sub.Build()
+		if strings.TrimSpace(clause) != "" {
+			if i == 0 {
+				w.or = true
+			}
+			w.addCondition("("+clause+")", args...)
+		}
 	}
 	return w
 }
@@ -53,11 +58,14 @@ func (w *JoinOnWrapper) And(conditions ...func(*JoinOnWrapper)) *JoinOnWrapper {
 		w.or = false
 		return w
 	}
-	sub := NewJoinOnWrapper()
-	conditions[0](sub)
-	clause, args := sub.Build()
-	if strings.TrimSpace(clause) != "" {
-		w.addCondition("("+clause+")", args...)
+	// 处理所有条件，用 AND 连接
+	for _, cond := range conditions {
+		sub := NewJoinOnWrapper()
+		cond(sub)
+		clause, args := sub.Build()
+		if strings.TrimSpace(clause) != "" {
+			w.addCondition("("+clause+")", args...)
+		}
 	}
 	return w
 }

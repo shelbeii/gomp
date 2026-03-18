@@ -28,8 +28,17 @@ func (w *QueryWrapper[T]) Raw(query string, args ...any) *QueryWrapper[T] {
 }
 
 // Or 设置下一个条件为 OR，或将多个子条件以 OR 连接后追加
-// Or()                    -> 下一个条件用 OR 连接
-// Or(f1, f2, ...)         -> (f1) OR (f2) OR ...，整体以当前连接符（AND/OR）追加
+//
+// 用法1：Or() - 设置下一个条件为 OR 连接
+//
+//	wrapper.Eq("status", 1).Or().Eq("status", 2)  // status = 1 OR status = 2
+//
+// 用法2：Or(func1, func2, ...) - 创建 OR 子句，整体以当前连接符追加
+//
+//	wrapper.Eq("type", "A").Or(
+//	  func(sub *QueryWrapper[T]) { sub.Eq("status", 1) },
+//	  func(sub *QueryWrapper[T]) { sub.Eq("status", 2) },
+//	)  // type = 'A' AND (status = 1 OR status = 2)
 func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper[T] {
 	if len(conditions) == 0 {
 		w.or = true
@@ -73,8 +82,18 @@ func (w *QueryWrapper[T]) Or(conditions ...func(*QueryWrapper[T])) *QueryWrapper
 }
 
 // And 将多个子条件以 AND 连接后追加（整体以当前连接符追加）
-// And()                    -> 重置为 AND 连接（清除上一个 Or() 标记）
-// And(f1, f2, ...)         -> (f1) AND (f2) AND ...，整体以当前连接符追加
+//
+// 用法1：And() - 重置为 AND 连接（清除上一个 Or() 标记）
+//
+//	wrapper.Eq("status", 1).Or().Eq("status", 2).And().Eq("type", "A")
+//	// (status = 1 OR status = 2) AND type = 'A'
+//
+// 用法2：And(func1, func2, ...) - 创建 AND 子句
+//
+//	wrapper.Eq("type", "A").And(
+//	  func(sub *QueryWrapper[T]) { sub.Eq("status", 1) },
+//	  func(sub *QueryWrapper[T]) { sub.Eq("level", 2) },
+//	)  // type = 'A' AND (status = 1 AND level = 2)
 func (w *QueryWrapper[T]) And(conditions ...func(*QueryWrapper[T])) *QueryWrapper[T] {
 	if len(conditions) == 0 {
 		w.or = false
