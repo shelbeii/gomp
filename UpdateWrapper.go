@@ -1,6 +1,8 @@
 package gomp
 
 import (
+	"errors"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -406,4 +408,36 @@ func (w *UpdateWrapper[T]) GetTableName() string {
 // HasJoin 检查是否包含 JOIN
 func (w *UpdateWrapper[T]) HasJoin() bool {
 	return w.hasJoin
+}
+
+// UpdateExecutor 通用更新执行器接口，用于支持不同泛型类型的 UpdateWrapper 混合批量更新
+// 包外可通过实现此接口扩展自定义更新逻辑
+type UpdateExecutor interface {
+	// Execute 在给定 db 上执行更新，返回错误
+	Execute(db *gorm.DB) error
+	// Validate 校验 wrapper 是否合法，idx 为在批量列表中的下标，allowGlobal 为是否允许全局更新
+	Validate(idx int, allowGlobal bool) error
+}
+
+// Execute 实现 UpdateExecutor 接口
+func (w *UpdateWrapper[T]) Execute(db *gorm.DB) error {
+	d := w.Apply(db)
+	if w.hasJoin {
+		return execJoinUpdate(d, w.values)
+	}
+	if w.tableName != "" {
+		return d.Updates(w.values).Error
+	}
+	return d.Model(new(T)).Updates(w.values).Error
+}
+
+// Validate 实现 UpdateExecutor 接口
+func (w *UpdateWrapper[T]) Validate(idx int, allowGlobal bool) error {
+	if !w.HasValues() {
+		return errors.New("update wrapper at index " + strconv.Itoa(idx) + " has no values to update")
+	}
+	if !allowGlobal && !w.hasWhereConditions() {
+		return errors.New("update wrapper at index " + strconv.Itoa(idx) + ": global update is not allowed without WHERE clause; set AllowGlobalUpdate=true to override")
+	}
+	return nil
 }

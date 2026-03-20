@@ -187,39 +187,28 @@ func Delete[T any](ctx context.Context, db *gorm.DB, wrapper *DeleteWrapper[T]) 
 	return d.Delete(new(T)).Error
 }
 
-// UpdateBatch 批量更新，在单次数据库连接中依次执行多个 UpdateWrapper
-// useTransaction: 可选参数，传 true 时开启事务（任意失败则全部回滚）；
-// 默认为 false，适用于调用方已自行管理事务的场景
-func UpdateBatch[T any](ctx context.Context, db *gorm.DB, wrappers []*UpdateWrapper[T], useTransaction ...bool) error {
-	if len(wrappers) == 0 {
+// execBatchUpdates 内部公共执行逻辑：校验并依次执行所有 UpdateExecutor
+// useTransaction 为 true 时开启事务，任意失败则全部回滚；
+// 为 false（默认）时直接执行，适用于调用方已自行管理事务的场景——注意此时若中途失败，
+// 已执行的更新不会回滚，可能造成数据部分更新，请确保业务上可接受或由外部事务保障。
+func execBatchUpdates(ctx context.Context, db *gorm.DB, executors []UpdateExecutor, useTransaction bool) error {
+	if len(executors) == 0 {
 		return nil
 	}
 
-	// 预校验所有 wrapper，避免执行中途才发现错误
-	for i, wrapper := range wrappers {
-		if wrapper == nil {
-			return errors.New("update wrapper at index " + itoa(i) + " cannot be nil")
+	allowGlobal := getConfig().Gomp.AllowGlobalUpdate
+	for i, executor := range executors {
+		if executor == nil {
+			return errors.New("update executor at index " + strconv.Itoa(i) + " cannot be nil")
 		}
-		if !wrapper.HasValues() {
-			return errors.New("update wrapper at index " + itoa(i) + " has no values to update")
-		}
-		if !getConfig().Gomp.AllowGlobalUpdate && !wrapper.hasWhereConditions() {
-			return errors.New("update wrapper at index " + itoa(i) + ": global update is not allowed without WHERE clause; set AllowGlobalUpdate=true to override")
+		if err := executor.Validate(i, allowGlobal); err != nil {
+			return err
 		}
 	}
 
-	execUpdates := func(tx *gorm.DB) error {
-		for _, wrapper := range wrappers {
-			d := wrapper.Apply(tx)
-			var err error
-			if wrapper.hasJoin {
-				err = execJoinUpdate(d, wrapper.values)
-			} else if wrapper.tableName != "" {
-				err = d.Updates(wrapper.values).Error
-			} else {
-				err = d.Model(new(T)).Updates(wrapper.values).Error
-			}
-			if err != nil {
+	run := func(tx *gorm.DB) error {
+		for _, executor := range executors {
+			if err := executor.Execute(tx); err != nil {
 				return err
 			}
 		}
@@ -227,15 +216,35 @@ func UpdateBatch[T any](ctx context.Context, db *gorm.DB, wrappers []*UpdateWrap
 	}
 
 	d := withCtx(db, ctx)
-	if len(useTransaction) > 0 && useTransaction[0] {
-		return d.Transaction(execUpdates)
+	if useTransaction {
+		return d.Transaction(run)
 	}
-	return execUpdates(d)
+	return run(d)
 }
 
-// itoa 将整数转换为字符串（内部工具函数）
-func itoa(i int) string {
-	return strconv.Itoa(i)
+// UpdateBatch 批量更新，在单次数据库连接中依次执行多个同类型 UpdateWrapper。
+// useTransaction: 可选参数，传 true 时开启事务（任意失败则全部回滚）；
+// 默认为 false，适用于调用方已自行管理事务的场景——注意此时若中途失败，
+// 已执行的更新不会回滚，请确保业务上可接受或由外部事务保障。
+func UpdateBatch[T any](ctx context.Context, db *gorm.DB, wrappers []*UpdateWrapper[T], useTransaction ...bool) error {
+	executors := make([]UpdateExecutor, len(wrappers))
+	for i, w := range wrappers {
+		if w == nil {
+			return errors.New("update wrapper at index " + strconv.Itoa(i) + " cannot be nil")
+		}
+		executors[i] = w
+	}
+	useTx := len(useTransaction) > 0 && useTransaction[0]
+	return execBatchUpdates(ctx, db, executors, useTx)
+}
+
+// UpdateBatchAny 批量更新，支持不同泛型类型的 UpdateWrapper 混合执行。
+// useTransaction: 可选参数，传 true 时开启事务（任意失败则全部回滚）；
+// 默认为 false，适用于调用方已自行管理事务的场景——注意此时若中途失败，
+// 已执行的更新不会回滚，请确保业务上可接受或由外部事务保障。
+func UpdateBatchAny(ctx context.Context, db *gorm.DB, executors []UpdateExecutor, useTransaction ...bool) error {
+	useTx := len(useTransaction) > 0 && useTransaction[0]
+	return execBatchUpdates(ctx, db, executors, useTx)
 }
 
 // Update 快捷更新

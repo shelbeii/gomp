@@ -355,6 +355,40 @@ w := gomp.NewUpdateWrapper[User]().
     Set("u.vip", 1).
     Gt("o.amount", 1000)
 userSvc.Update(ctx, w)
+
+// 批量更新
+// 在循环中构建不同类型的 wrapper，统一放入 []UpdateExecutor
+executors := make([]gomp.UpdateExecutor, 0)
+
+for _, u := range userList {
+executors = append(executors,
+gomp.NewUpdateWrapper[User]().Set("status", u.Status).Eq("id", u.ID),
+)
+}
+
+for _, o := range orderList {
+executors = append(executors,
+gomp.NewUpdateWrapper[Order]().Set("amount", o.Amount).Eq("id", o.ID),
+)
+}
+
+for _, p := range productList {
+executors = append(executors,
+gomp.NewUpdateWrapper[Product]().SetIncrBy("stock", -1).Eq("id", p.ID),
+)
+}
+
+// 不使用事务
+err := gomp.UpdateBatchAny(ctx, db, executors)
+
+// 使用事务
+err := gomp.UpdateBatchAny(ctx, db, executors, true)
+
+// 复用外部事务
+db.Transaction(func(tx *gorm.DB) error {
+return gomp.UpdateBatchAny(ctx, tx, executors)
+})
+
 ```
 
 | 方法 | 说明 |
