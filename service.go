@@ -3,6 +3,7 @@ package gomp
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -184,6 +185,57 @@ func Delete[T any](ctx context.Context, db *gorm.DB, wrapper *DeleteWrapper[T]) 
 		d = d.Unscoped()
 	}
 	return d.Delete(new(T)).Error
+}
+
+// UpdateBatch 批量更新，在单次数据库连接中依次执行多个 UpdateWrapper
+// useTransaction: 可选参数，传 true 时开启事务（任意失败则全部回滚）；
+// 默认为 false，适用于调用方已自行管理事务的场景
+func UpdateBatch[T any](ctx context.Context, db *gorm.DB, wrappers []*UpdateWrapper[T], useTransaction ...bool) error {
+	if len(wrappers) == 0 {
+		return nil
+	}
+
+	// 预校验所有 wrapper，避免执行中途才发现错误
+	for i, wrapper := range wrappers {
+		if wrapper == nil {
+			return errors.New("update wrapper at index " + itoa(i) + " cannot be nil")
+		}
+		if !wrapper.HasValues() {
+			return errors.New("update wrapper at index " + itoa(i) + " has no values to update")
+		}
+		if !getConfig().Gomp.AllowGlobalUpdate && !wrapper.hasWhereConditions() {
+			return errors.New("update wrapper at index " + itoa(i) + ": global update is not allowed without WHERE clause; set AllowGlobalUpdate=true to override")
+		}
+	}
+
+	execUpdates := func(tx *gorm.DB) error {
+		for _, wrapper := range wrappers {
+			d := wrapper.Apply(tx)
+			var err error
+			if wrapper.hasJoin {
+				err = execJoinUpdate(d, wrapper.values)
+			} else if wrapper.tableName != "" {
+				err = d.Updates(wrapper.values).Error
+			} else {
+				err = d.Model(new(T)).Updates(wrapper.values).Error
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	d := withCtx(db, ctx)
+	if len(useTransaction) > 0 && useTransaction[0] {
+		return d.Transaction(execUpdates)
+	}
+	return execUpdates(d)
+}
+
+// itoa 将整数转换为字符串（内部工具函数）
+func itoa(i int) string {
+	return strconv.Itoa(i)
 }
 
 // Update 快捷更新
