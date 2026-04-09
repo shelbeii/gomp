@@ -205,6 +205,51 @@ func (w *QueryWrapper[T]) EqColumn(leftColumn, rightColumn string, condition ...
 	return w
 }
 
+// NeColumn 列与列比较 left <> right
+func (w *QueryWrapper[T]) NeColumn(leftColumn, rightColumn string, condition ...bool) *QueryWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condNeColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
+// GtColumn 列与列比较 left > right
+func (w *QueryWrapper[T]) GtColumn(leftColumn, rightColumn string, condition ...bool) *QueryWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condGtColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
+// GeColumn 列与列比较 left >= right
+func (w *QueryWrapper[T]) GeColumn(leftColumn, rightColumn string, condition ...bool) *QueryWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condGeColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
+// LtColumn 列与列比较 left < right
+func (w *QueryWrapper[T]) LtColumn(leftColumn, rightColumn string, condition ...bool) *QueryWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condLtColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
+// LeColumn 列与列比较 left <= right
+func (w *QueryWrapper[T]) LeColumn(leftColumn, rightColumn string, condition ...bool) *QueryWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condLeColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
 // Ne 不等于 <>
 func (w *QueryWrapper[T]) Ne(column string, val any, condition ...bool) *QueryWrapper[T] {
 	if len(condition) > 0 && !condition[0] {

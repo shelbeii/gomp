@@ -113,6 +113,26 @@ func condEqColumn(m *conditionMixin, leftColumn, rightColumn string) {
 	m.addCond(leftColumn + " = " + rightColumn)
 }
 
+func condNeColumn(m *conditionMixin, leftColumn, rightColumn string) {
+	m.addCond(leftColumn + " <> " + rightColumn)
+}
+
+func condGtColumn(m *conditionMixin, leftColumn, rightColumn string) {
+	m.addCond(leftColumn + " > " + rightColumn)
+}
+
+func condGeColumn(m *conditionMixin, leftColumn, rightColumn string) {
+	m.addCond(leftColumn + " >= " + rightColumn)
+}
+
+func condLtColumn(m *conditionMixin, leftColumn, rightColumn string) {
+	m.addCond(leftColumn + " < " + rightColumn)
+}
+
+func condLeColumn(m *conditionMixin, leftColumn, rightColumn string) {
+	m.addCond(leftColumn + " <= " + rightColumn)
+}
+
 // buildJoinScope 构造带自定义 ON 条件的 JOIN scope
 // 提前执行 Build() 缓存结果，避免每次查询重复构建
 func buildJoinScope(joinType, table, leftColumn, rightColumn string, builders ...func(*JoinOnWrapper)) func(*gorm.DB) *gorm.DB {

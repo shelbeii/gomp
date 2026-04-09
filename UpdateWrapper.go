@@ -171,6 +171,51 @@ func (w *UpdateWrapper[T]) EqColumn(leftColumn, rightColumn string, condition ..
 	return w
 }
 
+// NeColumn 列与列比较 left <> right
+func (w *UpdateWrapper[T]) NeColumn(leftColumn, rightColumn string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condNeColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
+// GtColumn 列与列比较 left > right
+func (w *UpdateWrapper[T]) GtColumn(leftColumn, rightColumn string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condGtColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
+// GeColumn 列与列比较 left >= right
+func (w *UpdateWrapper[T]) GeColumn(leftColumn, rightColumn string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condGeColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
+// LtColumn 列与列比较 left < right
+func (w *UpdateWrapper[T]) LtColumn(leftColumn, rightColumn string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condLtColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
+// LeColumn 列与列比较 left <= right
+func (w *UpdateWrapper[T]) LeColumn(leftColumn, rightColumn string, condition ...bool) *UpdateWrapper[T] {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	condLeColumn(&w.conditionMixin, leftColumn, rightColumn)
+	return w
+}
+
 // Ne 不等于 <>
 func (w *UpdateWrapper[T]) Ne(column string, val any, condition ...bool) *UpdateWrapper[T] {
 	if len(condition) > 0 && !condition[0] {

@@ -92,6 +92,46 @@ func (w *JoinOnWrapper) EqColumn(leftColumn string, rightColumn string, conditio
 	return w
 }
 
+func (w *JoinOnWrapper) NeColumn(leftColumn string, rightColumn string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(leftColumn + " <> " + rightColumn)
+	return w
+}
+
+func (w *JoinOnWrapper) GtColumn(leftColumn string, rightColumn string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(leftColumn + " > " + rightColumn)
+	return w
+}
+
+func (w *JoinOnWrapper) GeColumn(leftColumn string, rightColumn string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(leftColumn + " >= " + rightColumn)
+	return w
+}
+
+func (w *JoinOnWrapper) LtColumn(leftColumn string, rightColumn string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(leftColumn + " < " + rightColumn)
+	return w
+}
+
+func (w *JoinOnWrapper) LeColumn(leftColumn string, rightColumn string, condition ...bool) *JoinOnWrapper {
+	if len(condition) > 0 && !condition[0] {
+		return w
+	}
+	w.addCondition(leftColumn + " <= " + rightColumn)
+	return w
+}
+
 func (w *JoinOnWrapper) Ne(column string, val any, condition ...bool) *JoinOnWrapper {
 	if len(condition) > 0 && !condition[0] {
 		return w
