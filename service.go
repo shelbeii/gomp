@@ -180,6 +180,12 @@ func Delete[T any](ctx context.Context, db *gorm.DB, wrapper *DeleteWrapper[T]) 
 	if wrapper != nil {
 		useSoftDelete = wrapper.useSoftDelete
 		d = wrapper.Apply(d)
+		if wrapper.hasJoin && len(wrapper.deleteTargets) > 0 {
+			if useSoftDelete {
+				return errors.New("join multi-table delete does not support soft delete; please call UseSoftDelete(false)")
+			}
+			return execJoinDelete(d, wrapper.deleteTargets)
+		}
 	}
 	if !useSoftDelete {
 		d = d.Unscoped()
@@ -367,6 +373,53 @@ func execJoinUpdate(db *gorm.DB, values map[string]any) error {
 	}
 
 	return db.Exec(sqlBuilder.String(), args...).Error
+}
+
+// execJoinDelete 执行联表多表删除，例如 DELETE t1, t2 FROM ... JOIN ... WHERE ...
+func execJoinDelete(db *gorm.DB, deleteTargets []string) error {
+	if len(deleteTargets) == 0 {
+		return errors.New("no delete targets specified")
+	}
+
+	targets := make([]string, 0, len(deleteTargets))
+	for _, t := range deleteTargets {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			targets = append(targets, t)
+		}
+	}
+	if len(targets) == 0 {
+		return errors.New("no delete targets specified")
+	}
+
+	dryStmt := db.Session(&gorm.Session{DryRun: true}).Find(nil)
+	if dryStmt.Error != nil {
+		return dryStmt.Error
+	}
+
+	selectSQL := dryStmt.Statement.SQL.String()
+	if selectSQL == "" {
+		return errors.New("failed to generate SELECT statement")
+	}
+
+	fromIdx := findKeywordIndex(selectSQL, "FROM")
+	if fromIdx < 0 {
+		return errors.New("invalid SQL: FROM not found")
+	}
+
+	fromPart := strings.TrimSpace(selectSQL[fromIdx+4:])
+	if fromPart == "" {
+		return errors.New("invalid SQL: empty FROM clause")
+	}
+
+	var sqlBuilder strings.Builder
+	sqlBuilder.Grow(len(fromPart) + len(targets)*8 + 20)
+	sqlBuilder.WriteString("DELETE ")
+	sqlBuilder.WriteString(strings.Join(targets, ", "))
+	sqlBuilder.WriteString(" FROM ")
+	sqlBuilder.WriteString(fromPart)
+
+	return db.Exec(sqlBuilder.String(), dryStmt.Statement.Vars...).Error
 }
 
 // findFirstJoinIndex 查找第一个 JOIN 关键字的位置（包括 LEFT JOIN, RIGHT JOIN, INNER JOIN）

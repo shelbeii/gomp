@@ -419,13 +419,22 @@ w := gomp.NewDeleteWrapper[User]().
     Eq("id", 1)
 userSvc.Delete(ctx, w)
 
-// 联表删除
+// 联表删除（默认仍是软删除，按主模型删除）
 w := gomp.NewDeleteWrapper[User]().
     Table("user u").
     LeftJoinOn("login_log l", "l.user_id", "u.id", func(on *gomp.JoinOnWrapper) {
         on.Lt("l.login_time", "2023-01-01")
     }).
     IsNull("u.active_at")
+userSvc.Delete(ctx, w)
+
+// 多表物理删除（MySQL 语法：DELETE t1, t2 FROM ... JOIN ...）
+w = gomp.NewDeleteWrapper[User]().
+    Table("t_order t1").
+    LeftJoin("t_order_item t2", "t2.order_id", "t1.id").
+    DeleteTargets("t1", "t2").
+    UseSoftDelete(false).
+    Eq("t1.id", 1)
 userSvc.Delete(ctx, w)
 ```
 

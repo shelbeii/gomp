@@ -9,6 +9,8 @@ type DeleteWrapper[T any] struct {
 	conditionMixin
 	useSoftDelete bool
 	tableName     string
+	hasJoin       bool
+	deleteTargets []string
 }
 
 // NewDeleteWrapper 创建删除条件构造器
@@ -16,12 +18,23 @@ func NewDeleteWrapper[T any]() *DeleteWrapper[T] {
 	return &DeleteWrapper[T]{
 		conditionMixin: newConditionMixin(),
 		useSoftDelete:  true,
+		deleteTargets:  make([]string, 0, 2),
 	}
 }
 
 // Table 指定表名
 func (w *DeleteWrapper[T]) Table(name string) *DeleteWrapper[T] {
 	w.tableName = name
+	return w
+}
+
+// DeleteTargets 指定 DELETE 目标（用于多表删除）
+// 例如：DeleteTargets("t1", "t2") => DELETE t1, t2 FROM ...
+func (w *DeleteWrapper[T]) DeleteTargets(targets ...string) *DeleteWrapper[T] {
+	if len(targets) == 0 {
+		return w
+	}
+	w.deleteTargets = append(w.deleteTargets, targets...)
 	return w
 }
 
@@ -318,6 +331,7 @@ func (w *DeleteWrapper[T]) NotBetween(column string, val1, val2 any, condition .
 
 // LeftJoin 左连接
 func (w *DeleteWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Joins("LEFT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
@@ -326,6 +340,7 @@ func (w *DeleteWrapper[T]) LeftJoin(table string, leftColumn string, rightColumn
 
 // RightJoin 右连接
 func (w *DeleteWrapper[T]) RightJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Joins("RIGHT JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
@@ -334,6 +349,7 @@ func (w *DeleteWrapper[T]) RightJoin(table string, leftColumn string, rightColum
 
 // InnerJoin 内连接
 func (w *DeleteWrapper[T]) InnerJoin(table string, leftColumn string, rightColumn string) *DeleteWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, func(db *gorm.DB) *gorm.DB {
 		return db.Joins("INNER JOIN " + table + " ON " + leftColumn + " = " + rightColumn)
 	})
@@ -342,18 +358,21 @@ func (w *DeleteWrapper[T]) InnerJoin(table string, leftColumn string, rightColum
 
 // LeftJoinOn 左连接（自定义 ON 条件）
 func (w *DeleteWrapper[T]) LeftJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, buildJoinScope("LEFT JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
 // RightJoinOn 右连接（自定义 ON 条件）
 func (w *DeleteWrapper[T]) RightJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, buildJoinScope("RIGHT JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
 
 // InnerJoinOn 内连接（自定义 ON 条件）
 func (w *DeleteWrapper[T]) InnerJoinOn(table string, leftColumn string, rightColumn string, builders ...func(*JoinOnWrapper)) *DeleteWrapper[T] {
+	w.hasJoin = true
 	w.scopes = append(w.scopes, buildJoinScope("INNER JOIN", table, leftColumn, rightColumn, builders...))
 	return w
 }
